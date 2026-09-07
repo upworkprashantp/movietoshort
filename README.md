@@ -72,6 +72,10 @@ npm run dist:mac         # dmg + zip for macOS    -> dist/
 npm run dist:linux       # AppImage               -> dist/
 ```
 
+On Windows, `dist:win` needs permission to create symbolic links (electron-builder unpacks its tooling with them).
+Turn on **Settings → System → For developers → Developer Mode** once, or run the command from an administrator
+terminal. The GitHub Actions workflow in `.github/workflows/build.yml` builds all platforms without any of this.
+
 Smoke test the built app without clicking (used by CI):
 
 ```bash
