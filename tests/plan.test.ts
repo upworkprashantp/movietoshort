@@ -108,3 +108,24 @@ test('templates and file names', () => {
   assert.equal(safeFileName('Movie: The "Best"? <Ever> | 2024'), 'Movie- The -Best- -Ever- - 2024')
   assert.equal(safeFileName('   '), 'video')
 })
+
+test('cuts moving apart cannot exceed the hard limit', () => {
+  const base = {
+    durationSec: 540,
+    skipStartSec: 0,
+    skipEndSec: 0,
+    targetLengthSec: 180,
+    maxLengthSec: 180,
+    smartCut: true,
+    searchWindowSec: 30
+  }
+  // Ideal cuts at 180 and 360. A pause at 165 and one at 385 would give a 220 s middle part.
+  const bad = planParts({ ...base, silences: [{ start: 164, end: 166 }, { start: 384, end: 386 }] })
+  assert.equal(bad.length, 3)
+  for (const p of bad) assert.ok(p.duration <= 180.001, `part ${p.index} is ${p.duration}s`)
+  // Pauses that do fit are still used.
+  const good = planParts({ ...base, silences: [{ start: 179, end: 181 }, { start: 359, end: 361 }] })
+  assert.equal(good[0].end, 180)
+  assert.equal(good[1].end, 360)
+  assert.ok(good[0].snappedEnd && good[1].snappedEnd)
+})

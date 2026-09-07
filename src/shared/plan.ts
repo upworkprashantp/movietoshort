@@ -41,14 +41,18 @@ export function planParts(o: PlanOptions): PartPlan[] {
   const snapped: boolean[] = [false]
   for (let i = 1; i < count; i++) {
     const idealPoint = start + ideal * i
-    let point = idealPoint
+    const prev = bounds[i - 1]
+    const nextIdeal = i + 1 < count ? start + ideal * (i + 1) : end
+    // Hard limits: this part may not exceed maxLen, and whatever remains after this cut must
+    // still fit into the remaining parts. Together they guarantee no part ever exceeds maxLen,
+    // however the cuts before or after this one move.
+    const hardLo = end - (count - i) * maxLen
+    const hardHi = prev + maxLen
+    let point = clamp(idealPoint, hardLo, hardHi)
     let didSnap = false
     if (o.smartCut && o.silences && o.silences.length) {
-      const prev = bounds[i - 1]
-      const lo = Math.max(idealPoint - o.searchWindowSec, prev + minPart)
-      // The next ideal point (or the end) must still leave room for a valid part.
-      const nextIdeal = i + 1 < count ? start + ideal * (i + 1) : end
-      const hi = Math.min(idealPoint + o.searchWindowSec, nextIdeal - minPart, prev + maxLen)
+      const lo = Math.max(idealPoint - o.searchWindowSec, prev + minPart, hardLo)
+      const hi = Math.min(idealPoint + o.searchWindowSec, nextIdeal - minPart, hardHi)
       const best = bestSilence(o.silences, idealPoint, lo, hi)
       if (best !== null) {
         point = best
@@ -82,7 +86,7 @@ export function planParts(o: PlanOptions): PartPlan[] {
  * Longer silences (scene breaks) are preferred, closeness to the ideal point is the tie-breaker.
  */
 function bestSilence(silences: Silence[], ideal: number, lo: number, hi: number): number | null {
-  if (hi <= lo) return null
+  if (hi < lo) return null
   let best: number | null = null
   let bestScore = -Infinity
   for (const s of silences) {

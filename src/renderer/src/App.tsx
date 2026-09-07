@@ -45,6 +45,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     api.getAppInfo().then((i) => {
       setInfo(i)
+      document.body.classList.add(`platform-${i.platform}`)
       if (!settings.outputDir) update({ outputDir: i.defaultOutputDir })
     })
     api.ytdlpStatus().then(setYtdlp)

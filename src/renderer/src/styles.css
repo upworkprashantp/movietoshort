@@ -136,6 +136,10 @@ hr {
 .topbar button {
   -webkit-app-region: no-drag;
 }
+/* macOS traffic lights sit over the top-left corner with the inset title bar. */
+.platform-darwin .topbar {
+  padding-left: 86px;
+}
 .topbar .error {
   max-width: 520px;
 }
