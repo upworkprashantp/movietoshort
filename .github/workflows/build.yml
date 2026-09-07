@@ -26,13 +26,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - name: windows-x64
+            os: windows-latest
             script: dist:win
-          - os: macos-latest # Apple Silicon
+          - name: mac-arm64
+            os: macos-latest
             script: dist:mac
-          - os: macos-13 # Intel
-            script: dist:mac
-          - os: ubuntu-latest
+          - name: mac-x64
+            # Intel runners are gone; cross-build x64 on Apple Silicon. npm_config_arch makes
+            # ffmpeg-static fetch the x64 binary and --x64 makes electron-builder pack x64 Electron.
+            os: macos-latest
+            script: dist:mac -- --x64
+            arch: x64
+          - name: linux-x64
+            os: ubuntu-latest
             script: dist:linux
     runs-on: ${{ matrix.os }}
     steps:
@@ -42,6 +49,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+        env:
+          npm_config_arch: ${{ matrix.arch || '' }}
       - run: npm run ${{ matrix.script }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -54,7 +63,7 @@ jobs:
           MOVIETOSHORT_SMOKE: smoke.png
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}
+          name: ${{ matrix.name }}
           path: |
             dist/*.exe
             dist/*.dmg
