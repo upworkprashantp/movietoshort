@@ -1,0 +1,35 @@
+appId: org.movietoshort.app
+productName: MovieToShort
+copyright: MIT License
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - "**/node_modules/ffmpeg-static/**"
+  - "**/node_modules/ffprobe-static/**"
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+mac:
+  category: public.app-category.video
+  target:
+    - target: dmg
+    - target: zip
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  hardenedRuntime: false
+  gatekeeperAssess: false
+linux:
+  target:
+    - AppImage
+  category: AudioVideo
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+publish: null

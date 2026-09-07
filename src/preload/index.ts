@@ -1,0 +1,46 @@
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type {
+  AppInfo,
+  CookiesBrowser,
+  PreviewRequest,
+  ProgressEvent,
+  RenderJob,
+  RenderResult,
+  Silence,
+  SourceInfo,
+  YtDlpStatus
+} from '@shared/types'
+
+const api = {
+  getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke('app:info'),
+  pickVideoFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickVideo'),
+  pickOutputDir: (current?: string): Promise<string | null> => ipcRenderer.invoke('dialog:pickDir', current),
+  loadLocal: (file: string): Promise<SourceInfo> => ipcRenderer.invoke('source:loadLocal', file),
+  loadYouTube: (url: string, cookies: CookiesBrowser): Promise<SourceInfo> =>
+    ipcRenderer.invoke('source:loadYouTube', url, cookies),
+  analyzeSilence: (file: string, audioStreamIndex: number, durationSec: number): Promise<Silence[]> =>
+    ipcRenderer.invoke('silence:analyze', file, audioStreamIndex, durationSec),
+  renderPreview: (req: PreviewRequest): Promise<string> => ipcRenderer.invoke('preview:render', req),
+  startRender: (job: RenderJob): Promise<RenderResult> => ipcRenderer.invoke('render:start', job),
+  cancel: (): Promise<void> => ipcRenderer.invoke('job:cancel'),
+  detectEncoder: (): Promise<string | null> => ipcRenderer.invoke('encoder:detect'),
+  ytdlpStatus: (): Promise<YtDlpStatus> => ipcRenderer.invoke('ytdlp:status'),
+  ytdlpInstall: (): Promise<YtDlpStatus> => ipcRenderer.invoke('ytdlp:install'),
+  clearCache: (): Promise<number> => ipcRenderer.invoke('cache:clear'),
+  openPath: (p: string): Promise<string> => ipcRenderer.invoke('shell:openPath', p),
+  showInFolder: (p: string): Promise<void> => ipcRenderer.invoke('shell:showItem', p),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
+  /** Smoke-test hook: tells the main process the scripted flow finished. */
+  smokeDone: (status: string): void => ipcRenderer.send('smoke:done', status),
+  /** Absolute path of a File dropped onto the window. */
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+  onProgress: (cb: (e: ProgressEvent) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, payload: ProgressEvent): void => cb(payload)
+    ipcRenderer.on('progress', handler)
+    return () => ipcRenderer.removeListener('progress', handler)
+  }
+}
+
+export type Api = typeof api
+
+contextBridge.exposeInMainWorld('api', api)

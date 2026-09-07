@@ -1,0 +1,99 @@
+/**
+ * End-to-end check of the ffmpeg pipeline without Electron.
+ * Generates a synthetic video, renders one part per layout, a preview frame and runs silence detection.
+ *
+ *   npm run test:integration
+ */
+import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import ffmpegStatic from 'ffmpeg-static'
+import ffprobeStatic from 'ffprobe-static'
+import { buildGraph } from '../src/main/filtergraph'
+import { videoEncoderArgs, AUDIO_ARGS } from '../src/shared/encoding'
+import { DEFAULT_SETTINGS } from '../src/shared/types'
+import { formatFfmpegTime } from '../src/shared/time'
+import { parseSilenceOutput, planParts } from '../src/shared/plan'
+
+const ff = String(ffmpegStatic)
+const ffprobe = ffprobeStatic.path
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mts-it-'))
+const src = path.join(dir, 'test.mp4')
+let failed = false
+
+function run(bin: string, args: string[]): { code: number | null; out: string; err: string } {
+  const r = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  return { code: r.status, out: r.stdout, err: r.stderr }
+}
+function check(ok: boolean, label: string, detail = ''): void {
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}${detail ? ' ' + detail : ''}`)
+  if (!ok) failed = true
+}
+
+// 1. synthetic source: 45 s, 1920x800, tone with a 2 s silence every 10 s
+run(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1920x800:rate=30', '-f', 'lavfi', '-i',
+  "aevalsrc='if(lt(mod(t,10),8),0.4*sin(440*2*PI*t),0)':s=48000", '-t', '45', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', src])
+check(fs.existsSync(src), 'synthetic source created')
+run(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=red@0.85:s=320x110,format=rgba', '-frames:v', '1', path.join(dir, 'badge.png')])
+run(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=white@0.9:s=420x100,format=rgba', '-frames:v', '1', path.join(dir, 'teaser.png')])
+
+// 2. silence detection + planning
+const sil = run(ff, ['-hide_banner', '-nostats', '-loglevel', 'info', '-i', src, '-map', '0:1', '-vn', '-sn', '-dn', '-af', 'silencedetect=noise=-30dB:d=0.35', '-f', 'null', '-progress', 'pipe:1', '-'])
+const silences = parseSilenceOutput(sil.err)
+check(silences.length >= 3, 'silences detected', silences.map((s) => `${s.start.toFixed(1)}-${s.end.toFixed(1)}`).join(' '))
+check(sil.out.includes('out_time_us='), 'progress reported on stdout')
+const parts = planParts({ durationSec: 45, skipStartSec: 3, skipEndSec: 2, targetLengthSec: 15, maxLengthSec: 180, smartCut: true, silences, searchWindowSec: 6 })
+check(parts.length === 3 && parts.every((p) => p.duration <= 180), 'plan built', parts.map((p) => `${p.start}-${p.end}${p.snappedEnd ? '*' : ''}`).join(' '))
+
+// 3. render one part per layout with every overlay type
+const settings = { ...DEFAULT_SETTINGS }
+for (const layout of ['blur', 'fill', 'solid'] as const) {
+  const part = parts[0]
+  const graph = buildGraph({
+    settings: { ...settings, layout },
+    srcW: 1920, srcH: 800, storedW: 1920, storedH: 800,
+    videoStreamIndex: 0, audioStreamIndex: 1, fps: null, partDuration: part.duration,
+    overlays: [
+      { path: path.join(dir, 'badge.png'), position: 'top-left', offsetY: 0 },
+      { path: path.join(dir, 'teaser.png'), position: 'bottom-center', from: part.duration - 3, to: part.duration + 1, fadeIn: 0.35, offsetY: 0 }
+    ]
+  })
+  const out = path.join(dir, `out-${layout}.mp4`)
+  const t0 = Date.now()
+  const r = run(ff, ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-ss', formatFfmpegTime(part.start), '-t', formatFfmpegTime(part.duration), '-i', src,
+    ...graph.inputArgs, '-filter_complex', graph.filterComplex, '-map', graph.videoLabel, '-map', graph.audioLabel!,
+    ...videoEncoderArgs(null, 'fast'), '-pix_fmt', 'yuv420p', '-fps_mode', 'cfr', ...AUDIO_ARGS, '-movflags', '+faststart', '-progress', 'pipe:1', out])
+  if (r.code !== 0) {
+    check(false, `render ${layout}`, r.err.trim().split('\n').slice(-3).join(' | '))
+    console.log('   graph:', graph.filterComplex)
+    continue
+  }
+  const probe = run(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type,width,height:format=duration', '-of', 'json', out])
+  const info = JSON.parse(probe.out) as { streams: Array<{ codec_type: string; width?: number; height?: number }>; format: { duration: string } }
+  const v = info.streams.find((s) => s.codec_type === 'video')
+  const a = info.streams.find((s) => s.codec_type === 'audio')
+  const durOk = Math.abs(Number(info.format.duration) - part.duration) < 0.3
+  check(v?.width === 1080 && v?.height === 1920 && !!a && durOk, `render ${layout}`,
+    `${((Date.now() - t0) / 1000).toFixed(1)}s, ${v?.width}x${v?.height}, audio=${!!a}, duration=${Number(info.format.duration).toFixed(2)}s (want ${part.duration})`)
+}
+
+// 4. preview frame at the end of a part (teaser visible, progress bar nearly full)
+{
+  const part = parts[1]
+  const graph = buildGraph({
+    settings, srcW: 1920, srcH: 800, storedW: 1920, storedH: 800, videoStreamIndex: 0, audioStreamIndex: undefined,
+    fps: null, partDuration: part.duration, previewOffset: part.duration - 1.5,
+    overlays: [
+      { path: path.join(dir, 'badge.png'), position: 'top-right' },
+      { path: path.join(dir, 'teaser.png'), position: 'bottom-center', from: part.duration - 3, to: part.duration + 1, fadeIn: 0.35 }
+    ]
+  })
+  const out = path.join(dir, 'preview.jpg')
+  const r = run(ff, ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-ss', formatFfmpegTime(part.start + part.duration - 1.5), '-t', '1', '-i', src,
+    ...graph.inputArgs, '-filter_complex', graph.filterComplex, '-map', graph.videoLabel, '-frames:v', '1', '-q:v', '3', '-f', 'image2', '-update', '1', out])
+  check(r.code === 0 && fs.existsSync(out) && fs.statSync(out).size > 10_000, 'preview frame', r.code === 0 ? `${fs.statSync(out).size} bytes` : r.err.trim())
+}
+
+console.log(`\nartifacts in ${dir}`)
+process.exit(failed ? 1 : 0)

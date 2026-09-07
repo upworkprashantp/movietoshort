@@ -1,0 +1,45 @@
+{
+  "name": "movietoshort",
+  "version": "1.0.0",
+  "description": "Turn any long video or YouTube link into numbered, vertical, ready-to-post Shorts / Reels.",
+  "main": "./out/main/index.js",
+  "author": "MovieToShort contributors",
+  "license": "MIT",
+  "homepage": "https://github.com/movietoshort/movietoshort",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/movietoshort/movietoshort.git"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "icon": "node scripts/make-icon.js",
+    "postinstall": "electron-builder install-app-deps",
+    "dist": "npm run icon && electron-vite build && electron-builder",
+    "dist:win": "npm run icon && electron-vite build && electron-builder --win",
+    "dist:mac": "npm run icon && electron-vite build && electron-builder --mac",
+    "dist:linux": "npm run icon && electron-vite build && electron-builder --linux",
+    "test:integration": "node --import tsx tests/pipeline.integration.ts"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  }
+}
