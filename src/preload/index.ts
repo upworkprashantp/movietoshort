@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppInfo,
-  CookiesBrowser,
+  YtAuth,
   PreviewRequest,
   ProgressEvent,
   RenderJob,
@@ -16,8 +16,8 @@ const api = {
   pickVideoFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickVideo'),
   pickOutputDir: (current?: string): Promise<string | null> => ipcRenderer.invoke('dialog:pickDir', current),
   loadLocal: (file: string): Promise<SourceInfo> => ipcRenderer.invoke('source:loadLocal', file),
-  loadYouTube: (url: string, cookies: CookiesBrowser): Promise<SourceInfo> =>
-    ipcRenderer.invoke('source:loadYouTube', url, cookies),
+  loadUrl: (url: string, auth: YtAuth): Promise<SourceInfo> => ipcRenderer.invoke('source:loadUrl', url, auth),
+  pickCookiesFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickCookies'),
   analyzeSilence: (file: string, audioStreamIndex: number, durationSec: number): Promise<Silence[]> =>
     ipcRenderer.invoke('silence:analyze', file, audioStreamIndex, durationSec),
   renderPreview: (req: PreviewRequest): Promise<string> => ipcRenderer.invoke('preview:render', req),

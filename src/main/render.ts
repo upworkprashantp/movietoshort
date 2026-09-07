@@ -200,7 +200,8 @@ function writeSidecars(outDir: string, title: string, job: RenderJob, files: str
   const { parts, settings, source } = job
   const manifest = {
     title: source.title,
-    source: source.origin === 'youtube' ? source.url : source.path,
+    source: source.origin === 'link' ? source.url : source.path,
+    site: source.site,
     createdAt: new Date().toISOString(),
     settings,
     parts: parts.map((p, i) => ({ ...p, file: path.basename(files[i] ?? '') }))

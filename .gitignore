@@ -9,3 +9,4 @@ build/icon.icns
 Thumbs.db
 .vscode/
 .idea/
+*.tsbuildinfo

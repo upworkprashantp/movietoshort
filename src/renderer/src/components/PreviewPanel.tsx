@@ -44,7 +44,7 @@ export function PreviewPanel(p: Props): JSX.Element {
               <div className="safe-top" />
               <div className="safe-bottom" />
               <div className="safe-right" />
-              <span className="safe-label">UI covered on Shorts / Reels</span>
+              <span className="safe-label">UI covered on Shorts / Reels / TikTok</span>
             </div>
           )}
         </div>

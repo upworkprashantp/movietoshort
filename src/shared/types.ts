@@ -5,11 +5,13 @@ export type Platform = 'win32' | 'darwin' | 'linux'
 export interface SourceInfo {
   /** Absolute path to the playable file on disk. */
   path: string
-  /** Human title (YouTube title or filename without extension). */
+  /** Human title (page title for links, filename without extension for files). */
   title: string
-  /** Where it came from. */
-  origin: 'local' | 'youtube'
+  /** Where it came from: a local file or a link handled by yt-dlp. */
+  origin: 'local' | 'link'
   url?: string
+  /** Site name for links (e.g. "YouTube", "Vimeo", "TikTok"). */
+  site?: string
   durationSec: number
   width: number
   height: number
@@ -108,8 +110,15 @@ export interface Settings {
   hardwareEncode: boolean
   outputDir: string
 
-  // youtube
+  // link downloads (yt-dlp)
   cookiesBrowser: CookiesBrowser
+  /** Netscape cookies.txt exported from a logged-in browser. Takes precedence over cookiesBrowser. */
+  cookiesFile: string
+}
+
+export interface YtAuth {
+  browser: CookiesBrowser
+  file?: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -152,7 +161,8 @@ export const DEFAULT_SETTINGS: Settings = {
   hardwareEncode: false,
   outputDir: '',
 
-  cookiesBrowser: 'none'
+  cookiesBrowser: 'none',
+  cookiesFile: ''
 }
 
 /** A PNG (data URL) with a placement, produced by the renderer's canvas. */

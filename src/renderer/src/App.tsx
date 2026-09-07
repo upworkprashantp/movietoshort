@@ -133,13 +133,13 @@ export default function App(): JSX.Element {
     [afterLoad]
   )
 
-  const loadYouTube = useCallback(
+  const loadUrl = useCallback(
     async (url: string) => {
       setError(null)
       setPhase('loading')
       setProgress({ kind: 'download', percent: 0, message: 'Starting…' })
       try {
-        const src = await api.loadYouTube(url, settings.cookiesBrowser)
+        const src = await api.loadUrl(url, { browser: settings.cookiesBrowser, file: settings.cookiesFile || undefined })
         setPhase('idle')
         await afterLoad(src)
       } catch (err) {
@@ -148,7 +148,7 @@ export default function App(): JSX.Element {
         setPhase('idle')
       }
     },
-    [afterLoad, settings.cookiesBrowser]
+    [afterLoad, settings.cookiesBrowser, settings.cookiesFile]
   )
 
   const cancel = useCallback(() => {
@@ -295,7 +295,9 @@ export default function App(): JSX.Element {
             loadPercent={loadProgress?.percent ?? 0}
             cookiesBrowser={settings.cookiesBrowser}
             onCookiesChange={(v) => update({ cookiesBrowser: v })}
-            onLoadYouTube={loadYouTube}
+            cookiesFile={settings.cookiesFile}
+            onCookiesFileChange={(v) => update({ cookiesFile: v })}
+            onLoadUrl={loadUrl}
             onLoadLocal={loadLocal}
             onCancel={cancel}
             onAudioTrackChange={(index) => source && setSource({ ...source, audioStreamIndex: index })}

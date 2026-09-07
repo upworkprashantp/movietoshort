@@ -3,7 +3,7 @@ import path from 'node:path'
 import { net } from 'electron'
 import { cacheDir, ffmpegPath, ytdlpDownloadUrl, ytdlpPath } from './binaries'
 import { run, runOk, CancelledError } from './proc'
-import type { CookiesBrowser, YtDlpStatus } from '@shared/types'
+import type { YtAuth, YtDlpStatus } from '@shared/types'
 
 let versionCache: string | undefined
 
@@ -70,14 +70,97 @@ export interface YtInfo {
   duration?: number
   thumbnail?: string
   webpage_url?: string
+  extractor_key?: string
+  extractor?: string
 }
 
-function cookieArgs(browser: CookiesBrowser): string[] {
-  return browser && browser !== 'none' ? ['--cookies-from-browser', browser] : []
+/** "YoutubeTab" -> "YouTube", "TwitterSpaces" -> "Twitter Spaces", "vimeo" -> "Vimeo". */
+export function siteName(info: YtInfo): string {
+  const key = (info.extractor_key ?? info.extractor ?? '').replace(/:.*$/, '')
+  if (!key) return 'Link'
+  if (/^youtube/i.test(key)) return 'YouTube'
+  if (/^tiktok/i.test(key)) return 'TikTok'
+  return key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^\w/, (c) => c.toUpperCase())
 }
 
-function commonArgs(browser: CookiesBrowser): string[] {
-  return ['--no-playlist', '--no-warnings', '--ffmpeg-location', path.dirname(ffmpegPath()), ...cookieArgs(browser)]
+function cookieArgs(auth: YtAuth): string[] {
+  if (auth.file && fs.existsSync(auth.file)) return ['--cookies', auth.file]
+  return auth.browser && auth.browser !== 'none' ? ['--cookies-from-browser', auth.browser] : []
+}
+
+/**
+ * YouTube now requires a JavaScript runtime (Node 22+) to solve its player challenges, otherwise
+ * most formats are missing. The app's own Electron binary is a full Node when started with
+ * ELECTRON_RUN_AS_NODE=1, so every user has a runtime without installing anything.
+ */
+function runtimeArgs(): string[] {
+  return ['--js-runtimes', `node:${process.execPath}`]
+}
+
+function runtimeEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+}
+
+/**
+ * When YouTube flags a network with "sign in to confirm you're not a bot", the embedded player
+ * clients usually still work. Once a fallback succeeded we try it first for the rest of the session.
+ */
+const FALLBACK_CLIENTS = ['--extractor-args', 'youtube:player_client=web_embedded,mweb']
+let preferFallback = false
+
+function isBlocked(stderr: string): boolean {
+  return /confirm you.re not a bot|sign in to confirm|This video is not available|not available on this app/i.test(stderr)
+}
+
+function commonArgs(auth: YtAuth): string[] {
+  return [
+    '--no-playlist',
+    '--no-warnings',
+    '--ffmpeg-location',
+    path.dirname(ffmpegPath()),
+    ...runtimeArgs(),
+    ...cookieArgs(auth)
+  ]
+}
+
+function isCookieFailure(stderr: string): boolean {
+  return /Could not copy .* cookie database|Failed to decrypt with DPAPI|could not find .* cookies database|cookies database/i.test(
+    stderr
+  )
+}
+
+type RunOut = { code: number | null; stdout: Buffer; stderr: string }
+
+/**
+ * Run yt-dlp, retrying when the failure is something we can work around:
+ *  - browser cookies unreadable (Chrome/Edge on Windows): retry without cookies
+ *  - YouTube bot check / "not available": retry with the embedded player clients
+ */
+async function runWithFallback(
+  auth: YtAuth,
+  buildArgs: (auth: YtAuth) => string[],
+  opts: { signal?: AbortSignal; onStdoutLine?: (line: string) => void }
+): Promise<RunOut> {
+  const clientOrder = preferFallback ? [FALLBACK_CLIENTS, []] : [[], FALLBACK_CLIENTS]
+  let currentAuth = auth
+  let last: RunOut | undefined
+  for (let i = 0; i < clientOrder.length; i++) {
+    const res = await run(ytdlpPath(), [...clientOrder[i], ...buildArgs(currentAuth)], { ...opts, env: runtimeEnv() })
+    if (res.code === 0) {
+      if (clientOrder[i].length) preferFallback = true
+      return res
+    }
+    if (opts.signal?.aborted) throw new CancelledError()
+    last = res
+    if (currentAuth.browser !== 'none' && !currentAuth.file && isCookieFailure(res.stderr)) {
+      // Same client set again, just without the unreadable browser cookies.
+      currentAuth = { browser: 'none' }
+      i--
+      continue
+    }
+    if (!isBlocked(res.stderr)) break
+  }
+  return last!
 }
 
 function extractError(stderr: string, fallback: string): string {
@@ -86,16 +169,25 @@ function extractError(stderr: string, fallback: string): string {
     .reverse()
     .find((l) => l.startsWith('ERROR:'))
   let msg = line ? line.replace(/^ERROR:\s*/, '') : fallback
+  if (/429|Too Many Requests/i.test(stderr)) {
+    return 'The site is rate-limiting this network right now (HTTP 429). Wait a few minutes and try again.'
+  }
+  if (/Could not copy Chrome cookie database|Failed to decrypt with DPAPI|could not find .* cookies database/i.test(msg)) {
+    return (
+      'Could not read cookies from that browser (it must be closed, and Chrome/Edge on Windows often block it). ' +
+      'Use a cookies.txt file instead: install the "Get cookies.txt LOCALLY" extension, export while logged into the site, then choose the file.'
+    )
+  }
   if (/confirm you.re not a bot|sign in to confirm|age.restricted|login required|private video/i.test(msg)) {
     msg =
       msg.split(/\.\s/)[0] +
-      '. Tip: open "Age-restricted or private video?" and pick the browser you are logged into YouTube with, then try again.'
+      '. Tip: open "Login required, age-restricted or private?" and choose a cookies.txt file exported from a browser where you are logged into the site.'
   }
   return msg
 }
 
-export async function fetchInfo(url: string, browser: CookiesBrowser, signal?: AbortSignal): Promise<YtInfo> {
-  const res = await run(ytdlpPath(), [...commonArgs(browser), '--dump-single-json', url], { signal })
+export async function fetchInfo(url: string, auth: YtAuth, signal?: AbortSignal): Promise<YtInfo> {
+  const res = await runWithFallback(auth, (a) => [...commonArgs(a), '--dump-single-json', url], { signal })
   if (res.code !== 0) throw new Error(extractError(res.stderr, 'yt-dlp could not read this link.'))
   const info = JSON.parse(res.stdout.toString('utf8')) as YtInfo
   if (!info.id) throw new Error('This link does not point to a single video.')
@@ -121,7 +213,7 @@ export interface DownloadProgress {
 export async function download(
   url: string,
   info: YtInfo,
-  browser: CookiesBrowser,
+  auth: YtAuth,
   onProgress: (p: DownloadProgress) => void,
   signal?: AbortSignal
 ): Promise<string> {
@@ -133,8 +225,8 @@ export async function download(
 
   const outTemplate = path.join(cacheDir(), '%(id)s.%(ext)s')
   let streamNo = 0
-  const args = [
-    ...commonArgs(browser),
+  const buildArgs = (a: YtAuth): string[] => [
+    ...commonArgs(a),
     '--newline',
     '--progress',
     '-f',
@@ -148,7 +240,7 @@ export async function download(
     url
   ]
 
-  const res = await run(ytdlpPath(), args, {
+  const res = await runWithFallback(auth, buildArgs, {
     signal,
     onStdoutLine: (line) => {
       if (line.includes('Destination:')) streamNo++

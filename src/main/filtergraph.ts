@@ -4,7 +4,7 @@ export const OUT_W = 1080
 export const OUT_H = 1920
 
 /**
- * Safe zones (px, at 1080x1920) that stay clear of the Shorts / Reels UI:
+ * Safe zones (px, at 1080x1920) that stay clear of the Shorts / Reels / TikTok UI:
  * top bar, bottom title/caption area and the right-hand action column.
  */
 export const SAFE = { side: 64, top: 190, bottom: 440, rightColumn: 200 }

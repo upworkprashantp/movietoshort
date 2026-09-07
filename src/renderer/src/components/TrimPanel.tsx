@@ -48,7 +48,7 @@ export function TrimPanel(p: Props): JSX.Element {
         </p>
       )}
 
-      <Field label="Part length" hint="YouTube Shorts and Reels allow up to 3 minutes">
+      <Field label="Part length" hint="Shorts and Reels allow up to 3 minutes, TikTok up to 10">
         <Segmented
           value={preset}
           disabled={disabled}

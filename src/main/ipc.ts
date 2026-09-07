@@ -10,7 +10,7 @@ import { detectHardwareEncoder } from './encoders'
 import { CancelledError } from './proc'
 import type {
   AppInfo,
-  CookiesBrowser,
+  YtAuth,
   PreviewRequest,
   ProgressEvent,
   RenderJob,
@@ -89,22 +89,36 @@ export function registerIpc(getWindow: () => BrowserWindow): void {
     }
   })
 
-  ipcMain.handle('source:loadYouTube', async (_e, url: string, cookies: CookiesBrowser): Promise<SourceInfo> => {
+  ipcMain.handle('dialog:pickCookies', async () => {
+    const res = await dialog.showOpenDialog(getWindow(), {
+      title: 'Choose a cookies.txt file',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Cookies', extensions: ['txt'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    return res.canceled ? null : res.filePaths[0]
+  })
+
+  ipcMain.handle('source:loadUrl', async (_e, url: string, auth: YtAuth): Promise<SourceInfo> => {
     const win = getWindow()
     const ctrl = startJob()
     try {
       await ytdlp.ensureInstalled((percent, message) => send(win, { kind: 'ytdlp', percent, message }))
       send(win, { kind: 'download', percent: 0, message: 'Reading video info…' })
-      const info = await ytdlp.fetchInfo(url, cookies, ctrl.signal)
+      const info = await ytdlp.fetchInfo(url, auth, ctrl.signal)
       const file = await ytdlp.download(
         url,
         info,
-        cookies,
+        auth,
         (p) => send(win, { kind: 'download', percent: p.percent, message: p.message }),
         ctrl.signal
       )
       send(win, { kind: 'download', percent: 100, message: 'Reading file…' })
-      return await probeFile(file, info.title, 'youtube', info.webpage_url ?? url)
+      const src = await probeFile(file, info.title, 'link', info.webpage_url ?? url)
+      src.site = ytdlp.siteName(info)
+      return src
     } catch (err) {
       friendly(err)
     } finally {

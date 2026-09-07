@@ -12,7 +12,9 @@ interface Props {
   loadPercent: number
   cookiesBrowser: CookiesBrowser
   onCookiesChange: (v: CookiesBrowser) => void
-  onLoadYouTube: (url: string) => void
+  cookiesFile: string
+  onCookiesFileChange: (v: string) => void
+  onLoadUrl: (url: string) => void
   onLoadLocal: (file: string) => void
   onCancel: () => void
   onAudioTrackChange: (index: number) => void
@@ -23,7 +25,7 @@ interface Props {
 const VIDEO_EXT = /\.(mp4|mkv|mov|avi|webm|m4v|ts|mts|m2ts|wmv|flv|mpg|mpeg|3gp|ogv|vob)$/i
 
 export function SourcePanel(p: Props): JSX.Element {
-  const [tab, setTab] = useState<'youtube' | 'file'>('youtube')
+  const [tab, setTab] = useState<'link' | 'file'>('link')
   const [url, setUrl] = useState('')
   const [dragging, setDragging] = useState(false)
 
@@ -44,7 +46,7 @@ export function SourcePanel(p: Props): JSX.Element {
   return (
     <Card
       title="1. Source"
-      subtitle="Paste a YouTube link or drop any video file."
+      subtitle="Paste a video link from 1,000+ sites, or drop any video file."
       right={
         p.ytdlp && (
           <Pill tone={p.ytdlp.installed ? 'ok' : 'warn'}>
@@ -54,25 +56,25 @@ export function SourcePanel(p: Props): JSX.Element {
       }
     >
       <div className="tabs">
-        <button className={tab === 'youtube' ? 'active' : ''} onClick={() => setTab('youtube')} type="button">
-          YouTube link
+        <button className={tab === 'link' ? 'active' : ''} onClick={() => setTab('link')} type="button">
+          Video link
         </button>
         <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')} type="button">
           Local file
         </button>
       </div>
 
-      {tab === 'youtube' ? (
+      {tab === 'link' ? (
         <form
           className="row"
           onSubmit={(e) => {
             e.preventDefault()
-            if (url.trim()) p.onLoadYouTube(url.trim())
+            if (url.trim()) p.onLoadUrl(url.trim())
           }}
         >
           <input
             className="input grow"
-            placeholder="https://www.youtube.com/watch?v=…"
+            placeholder="YouTube, Vimeo, TikTok, X, Instagram, Facebook, Twitch, Dailymotion, Reddit…"
             value={url}
             disabled={p.busy}
             onChange={(e) => setUrl(e.target.value)}
@@ -100,10 +102,44 @@ export function SourcePanel(p: Props): JSX.Element {
         </div>
       )}
 
-      {tab === 'youtube' && (
+      {tab === 'link' && (
+        <p className="muted small">
+          Any public video page that{' '}
+          <a href="#" onClick={(e) => { e.preventDefault(); api.openExternal('https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md') }}>
+            yt-dlp supports
+          </a>{' '}
+          works: YouTube, Vimeo, TikTok, X/Twitter, Instagram, Facebook, Twitch VODs, Dailymotion, Reddit, Rumble, Bilibili and 1,000+ more.
+          Use your own videos, or ones you have permission to cut.
+        </p>
+      )}
+
+      {tab === 'link' && (
         <details className="details">
-          <summary>Age-restricted or private video?</summary>
-          <Field label="Use cookies from browser" hint="Lets yt-dlp use your logged-in session. Close the browser first on Windows.">
+          <summary>Login required, age-restricted or private?</summary>
+          <Field
+            label="Cookies file (recommended)"
+            hint="Install the “Get cookies.txt LOCALLY” extension, export while logged into the site, then choose the file."
+          >
+            <div className="row">
+              <input className="input grow small" value={p.cookiesFile} readOnly placeholder="No file chosen" title={p.cookiesFile} />
+              <Button
+                size="sm"
+                disabled={p.busy}
+                onClick={async () => {
+                  const f = await api.pickCookiesFile()
+                  if (f) p.onCookiesFileChange(f)
+                }}
+              >
+                Choose…
+              </Button>
+              {p.cookiesFile && (
+                <Button size="sm" variant="ghost" disabled={p.busy} onClick={() => p.onCookiesFileChange('')}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </Field>
+          <Field label="Or read cookies from a browser" hint="Firefox works best. Chrome and Edge must be closed and often block this on Windows.">
             <Select<CookiesBrowser>
               value={p.cookiesBrowser}
               onChange={p.onCookiesChange}
@@ -122,7 +158,7 @@ export function SourcePanel(p: Props): JSX.Element {
             <Button size="sm" onClick={p.onUpdateYtDlp} disabled={p.busy}>
               Update yt-dlp
             </Button>
-            <span className="muted small">YouTube changes often. If a link fails, update first.</span>
+            <span className="muted small">Sites change often. If a link stops working, update first.</span>
           </div>
         </details>
       )}
@@ -154,7 +190,7 @@ export function SourcePanel(p: Props): JSX.Element {
               <span>{p.source.fps} fps</span>
               <span>{p.source.videoCodec.toUpperCase()}</span>
               <span>{p.source.hasAudio ? (p.source.audioCodec ?? 'audio').toUpperCase() : 'no audio'}</span>
-              <span>{p.source.origin === 'youtube' ? 'YouTube' : 'Local'}</span>
+              <span>{p.source.origin === 'link' ? (p.source.site ?? 'Link') : 'Local file'}</span>
             </div>
             {p.source.audioTracks.length > 1 && (
               <Field label="Audio track" inline>

@@ -1,7 +1,7 @@
 {
   "name": "movietoshort",
   "version": "1.0.0",
-  "description": "Turn any long video or YouTube link into numbered, vertical, ready-to-post Shorts / Reels.",
+  "description": "Turn any long video, local file or link from 1,000+ sites, into numbered vertical clips for Shorts, Reels and TikTok.",
   "main": "./out/main/index.js",
   "author": "MovieToShort contributors",
   "license": "MIT",
@@ -11,7 +11,7 @@
     "url": "https://github.com/movietoshort/movietoshort.git"
   },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -33,7 +33,7 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "electron": "^33.0.0",
+    "electron": "^38.8.6",
     "electron-builder": "^25.1.0",
     "electron-vite": "^2.3.0",
     "react": "^18.3.0",

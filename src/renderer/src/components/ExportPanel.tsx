@@ -27,7 +27,7 @@ export function ExportPanel(p: Props): JSX.Element {
   }
 
   return (
-    <Card title="5. Export" subtitle="1080×1920 H.264 MP4 with AAC audio, ready to upload.">
+    <Card title="5. Export" subtitle="1080×1920 H.264 MP4 with AAC audio, ready for Shorts, Reels and TikTok.">
       <div className="grid-2">
         <Field label="Quality">
           <Segmented<QualityPreset>
