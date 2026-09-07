@@ -5,10 +5,10 @@
   "main": "./out/main/index.js",
   "author": "MovieToShort contributors",
   "license": "MIT",
-  "homepage": "https://github.com/movietoshort/movietoshort",
+  "homepage": "https://github.com/upworkprashantp/movietoshort",
   "repository": {
     "type": "git",
-    "url": "https://github.com/movietoshort/movietoshort.git"
+    "url": "https://github.com/upworkprashantp/movietoshort.git"
   },
   "scripts": {
     "dev": "electron-vite dev --watch",

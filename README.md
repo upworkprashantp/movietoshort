@@ -92,7 +92,7 @@ The defaults come from what actually holds viewers on short-form platforms:
 Requirements: [Node.js](https://nodejs.org) 20 or newer.
 
 ```bash
-git clone https://github.com/movietoshort/movietoshort.git
+git clone https://github.com/upworkprashantp/movietoshort.git
 cd movietoshort
 npm install          # also downloads ffmpeg/ffprobe for your platform
 npm run dev          # start the app with hot reload

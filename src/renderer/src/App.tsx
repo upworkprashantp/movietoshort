@@ -279,7 +279,7 @@ export default function App(): JSX.Element {
           <Button size="sm" variant="ghost" onClick={reset} title="Reset all settings to defaults">
             Reset settings
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => api.openExternal('https://github.com/movietoshort/movietoshort')}>
+          <Button size="sm" variant="ghost" onClick={() => api.openExternal('https://github.com/upworkprashantp/movietoshort')}>
             GitHub
           </Button>
         </div>
