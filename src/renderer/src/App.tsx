@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AppInfo, ProgressEvent, RenderResult, Silence, SourceInfo, YtDlpStatus } from '@shared/types'
+import type { AppInfo, ProgressEvent, RenderJob, RenderResult, Silence, SourceInfo, YtDlpStatus } from '@shared/types'
 import { planParts } from '@shared/plan'
 import { api } from './lib/api'
 import { buildPartOverlays, ensureFonts } from './lib/overlays'
@@ -192,7 +192,7 @@ export default function App(): JSX.Element {
 
   const previewKey = useMemo(() => {
     const part = parts.find((x) => x.index === selectedPart)
-    const { outputDir: _o, quality: _q, fpsMode: _f, hardwareEncode: _h, normalizeAudio: _n, cookiesBrowser: _c, ...look } = settings
+    const { outputDir: _o, quality: _q, fpsMode: _f, hardwareEncode: _h, normalizeAudio: _n, cookiesBrowser: _c, cookiesFile: _cf, saveFullVideo: _sf, keepOriginal: _ko, ...look } = settings
     return JSON.stringify([source?.path, part?.start, part?.duration, parts.length, moment, look])
   }, [source, parts, selectedPart, settings, moment])
 
@@ -214,7 +214,15 @@ export default function App(): JSX.Element {
     try {
       await ensureFonts()
       const overlays = parts.map((part) => buildPartOverlays(settings, part, parts.length, source.title))
-      const res = await api.startRender({ source, settings, parts, overlays })
+      let full: RenderJob['full']
+      if (settings.saveFullVideo) {
+        const start = parts[0].start
+        const end = parts[parts.length - 1].end
+        const fullPart = { index: 1, start, end, duration: Math.round((end - start) * 1000) / 1000, snappedStart: false, snappedEnd: false }
+        // Same look as the parts, minus the part badge and the next-part teaser.
+        full = { part: fullPart, overlays: buildPartOverlays({ ...settings, badgeEnabled: false, teaserEnabled: false }, fullPart, 1, source.title) }
+      }
+      const res = await api.startRender({ source, settings, parts, overlays, full })
       setRenderResult(res)
     } catch (err) {
       const msg = errorMessage(err)
@@ -234,6 +242,7 @@ export default function App(): JSX.Element {
       targetLengthSec: 15,
       titleEnabled: true,
       watermarkEnabled: true,
+      saveFullVideo: true,
       quality: 'fast'
     })
     loadLocal(smoke.file)
@@ -345,6 +354,7 @@ export default function App(): JSX.Element {
             result={renderResult}
             error={renderError}
             hwEncoder={settings.hardwareEncode ? hwEncoder : undefined}
+            sourceOrigin={source?.origin}
             onRender={render}
             onCancel={cancel}
           />

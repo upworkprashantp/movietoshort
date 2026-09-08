@@ -109,6 +109,10 @@ export interface Settings {
   fpsMode: FpsMode
   hardwareEncode: boolean
   outputDir: string
+  /** Also render the whole trimmed range as one continuous vertical video. */
+  saveFullVideo: boolean
+  /** For links: copy the downloaded original next to the parts. */
+  keepOriginal: boolean
 
   // link downloads (yt-dlp)
   cookiesBrowser: CookiesBrowser
@@ -160,6 +164,8 @@ export const DEFAULT_SETTINGS: Settings = {
   fpsMode: 'source',
   hardwareEncode: false,
   outputDir: '',
+  saveFullVideo: false,
+  keepOriginal: false,
 
   cookiesBrowser: 'none',
   cookiesFile: ''
@@ -190,6 +196,8 @@ export interface RenderJob {
   settings: Settings
   parts: PartPlan[]
   overlays: PartOverlays[] // one entry per part
+  /** Present when settings.saveFullVideo is on: the whole trimmed range as one clip. */
+  full?: { part: PartPlan; overlays: PartOverlays }
 }
 
 export interface PreviewRequest {
@@ -219,6 +227,8 @@ export type ProgressEvent =
 export interface RenderResult {
   outputDir: string
   files: string[]
+  fullFile?: string
+  originalFile?: string
   cancelled: boolean
 }
 

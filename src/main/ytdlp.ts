@@ -169,8 +169,12 @@ function extractError(stderr: string, fallback: string): string {
     .reverse()
     .find((l) => l.startsWith('ERROR:'))
   let msg = line ? line.replace(/^ERROR:\s*/, '') : fallback
-  if (/429|Too Many Requests/i.test(stderr)) {
-    return 'The site is rate-limiting this network right now (HTTP 429). Wait a few minutes and try again.'
+  const http = /HTTP Error (403|412|429)/i.exec(stderr)
+  if (http) {
+    return (
+      `The site blocked this request (HTTP ${http[1]}, its anti-bot or rate limit). ` +
+      'Wait a few minutes and try again, or use a cookies.txt file exported from a browser where you are logged into the site.'
+    )
   }
   if (/Could not copy Chrome cookie database|Failed to decrypt with DPAPI|could not find .* cookies database/i.test(msg)) {
     return (

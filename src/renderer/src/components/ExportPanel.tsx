@@ -13,6 +13,7 @@ interface Props {
   result: RenderResult | null
   error: string | null
   hwEncoder: string | null | undefined
+  sourceOrigin?: 'local' | 'link'
   onRender: () => void
   onCancel: () => void
 }
@@ -69,6 +70,23 @@ export function ExportPanel(p: Props): JSX.Element {
         }
       />
 
+      <Toggle
+        checked={s.saveFullVideo}
+        disabled={d}
+        onChange={(v) => p.update({ saveFullVideo: v })}
+        label="Also save the full-length video"
+        hint="One continuous 9:16 file of the whole trimmed range with the same look, minus part badges. Takes about as long as all the parts together."
+      />
+      {p.sourceOrigin === 'link' && (
+        <Toggle
+          checked={s.keepOriginal}
+          disabled={d}
+          onChange={(v) => p.update({ keepOriginal: v })}
+          label="Keep a copy of the original download"
+          hint="Copies the downloaded source file next to the parts."
+        />
+      )}
+
       <Field label="Output folder">
         <div className="row">
           <input className="input grow mono small" value={s.outputDir} readOnly title={s.outputDir} />
@@ -89,7 +107,7 @@ export function ExportPanel(p: Props): JSX.Element {
           <ProgressBar percent={p.progress?.overallPercent ?? 0} />
           <div className="row space-between muted small mono">
             <span>
-              Part {p.progress?.partIndex ?? 0}/{p.progress?.totalParts ?? p.partCount} · {Math.round(p.progress?.partPercent ?? 0)}%
+              {p.progress?.partIndex ?? 0}/{p.progress?.totalParts ?? p.partCount} · {Math.round(p.progress?.partPercent ?? 0)}%
             </span>
             <span>
               {p.progress?.fps ? `${Math.round(p.progress.fps)} fps` : ''} {p.progress?.speed ? `· ${p.progress.speed}` : ''}
@@ -99,6 +117,7 @@ export function ExportPanel(p: Props): JSX.Element {
       ) : (
         <Button variant="primary" size="lg" onClick={p.onRender} disabled={p.disabled || p.partCount === 0}>
           Render {p.partCount ? `${p.partCount} short${p.partCount === 1 ? '' : 's'}` : ''}
+          {p.partCount && s.saveFullVideo ? ' + full video' : ''}
         </Button>
       )}
 
@@ -108,8 +127,10 @@ export function ExportPanel(p: Props): JSX.Element {
         <div className="result">
           <div className="row space-between">
             <span>
-              {p.result.cancelled ? <Pill tone="warn">Cancelled</Pill> : <Pill tone="ok">Done</Pill>} {p.result.files.length} file
+              {p.result.cancelled ? <Pill tone="warn">Cancelled</Pill> : <Pill tone="ok">Done</Pill>} {p.result.files.length} short
               {p.result.files.length === 1 ? '' : 's'}
+              {p.result.fullFile ? ' + full video' : ''}
+              {p.result.originalFile ? ' + original' : ''}
             </span>
             <div className="row">
               <Button size="sm" onClick={() => api.openPath(p.result!.outputDir)}>

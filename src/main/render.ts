@@ -64,6 +64,16 @@ export interface RenderContext {
   onProgress: (e: ProgressEvent) => void
 }
 
+interface RenderUnit {
+  /** 'part' units are numbered shorts, 'full' is the whole trimmed range in one file. */
+  kind: 'part' | 'full'
+  part: PartPlan
+  overlays: PartOverlays
+  outFile: string
+  label: string
+  metaTitle: string
+}
+
 export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<RenderResult> {
   const { source, settings, parts } = job
   if (!parts.length) throw new Error('Nothing to render: the plan has no parts.')
@@ -77,14 +87,47 @@ export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<Ren
   const encoder = settings.hardwareEncode ? await detectHardwareEncoder() : null
   const fps = targetFps(settings, source)
   const width = padWidth(parts.length)
+
+  const units: RenderUnit[] = parts.map((part, i) => ({
+    kind: 'part',
+    part,
+    overlays: job.overlays[i] ?? {},
+    outFile: path.join(outDir, `${title} - Part ${String(part.index).padStart(width, '0')}.mp4`),
+    label: `part ${part.index} of ${parts.length}`,
+    metaTitle: `${source.title} - ${renderTemplate(settings.badgeTemplate || 'Part {n}', part.index, parts.length)}`
+  }))
+  if (settings.saveFullVideo && job.full) {
+    units.push({
+      kind: 'full',
+      part: job.full.part,
+      overlays: job.full.overlays,
+      outFile: path.join(outDir, `${title} - Full.mp4`),
+      label: 'full-length video',
+      metaTitle: source.title
+    })
+  }
+
   const files: string[] = []
+  let fullFile: string | undefined
+  let originalFile: string | undefined
   let cancelled = false
+  const total = units.length
 
   try {
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]
-      const overlays = materialiseOverlays(job.overlays[i] ?? {}, work, `p${part.index}`)
-      const outFile = path.join(outDir, `${title} - Part ${String(part.index).padStart(width, '0')}.mp4`)
+    for (let i = 0; i < units.length; i++) {
+      const unit = units[i]
+      const { part } = unit
+      const overlays = materialiseOverlays(unit.overlays, work, unit.kind === 'full' ? 'full' : `p${part.index}`)
+      const progress = (partPercent: number, message: string, extra: { fps?: number; speed?: string } = {}): void =>
+        ctx.onProgress({
+          kind: 'render',
+          partIndex: i + 1,
+          totalParts: total,
+          partPercent,
+          overallPercent: ((i + partPercent / 100) / total) * 100,
+          message,
+          ...extra
+        })
 
       const attempt = async (enc: string | null): Promise<void> => {
         const graph = buildGraph({
@@ -120,12 +163,12 @@ export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<Ren
           '-movflags',
           '+faststart',
           '-metadata',
-          `title=${source.title} - ${renderTemplate(settings.badgeTemplate || 'Part {n}', part.index, parts.length)}`,
+          `title=${unit.metaTitle}`,
           '-metadata',
           'comment=Made with MovieToShort',
           '-progress',
           'pipe:1',
-          outFile
+          unit.outFile
         ]
 
         let lastEmit = 0
@@ -141,17 +184,7 @@ export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<Ren
             const now = Date.now()
             if (now - lastEmit < 200) return
             lastEmit = now
-            const partPercent = Math.min(99, (p.outTimeSec / part.duration) * 100)
-            ctx.onProgress({
-              kind: 'render',
-              partIndex: part.index,
-              totalParts: parts.length,
-              partPercent,
-              overallPercent: ((i + partPercent / 100) / parts.length) * 100,
-              fps: fpsNow,
-              speed,
-              message: `Rendering part ${part.index} of ${parts.length}`
-            })
+            progress(Math.min(99, (p.outTimeSec / part.duration) * 100), `Rendering ${unit.label}`, { fps: fpsNow, speed })
           }
         })
         if (res.code !== 0) throw new ProcessError('ffmpeg', res.code, res.stderr)
@@ -163,26 +196,27 @@ export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<Ren
         if (err instanceof CancelledError) throw err
         if (encoder) {
           // Hardware encoders fail in surprising ways (driver limits, odd sizes). Fall back once.
-          ctx.onProgress({
-            kind: 'render',
-            partIndex: part.index,
-            totalParts: parts.length,
-            partPercent: 0,
-            overallPercent: (i / parts.length) * 100,
-            message: `${encoder} failed, retrying part ${part.index} with software encoder`
-          })
+          progress(0, `${encoder} failed, retrying ${unit.label} with software encoder`)
           await attempt(null)
         } else throw err
       }
-      files.push(outFile)
+      if (unit.kind === 'full') fullFile = unit.outFile
+      else files.push(unit.outFile)
+      progress(100, `Finished ${unit.label}`)
+    }
+
+    if (settings.keepOriginal && source.origin === 'link') {
       ctx.onProgress({
         kind: 'render',
-        partIndex: part.index,
-        totalParts: parts.length,
+        partIndex: total,
+        totalParts: total,
         partPercent: 100,
-        overallPercent: ((i + 1) / parts.length) * 100,
-        message: `Finished part ${part.index} of ${parts.length}`
+        overallPercent: 100,
+        message: 'Copying original download…'
       })
+      const ext = path.extname(source.path) || '.mp4'
+      originalFile = path.join(outDir, `${title} - Original${ext}`)
+      fs.copyFileSync(source.path, originalFile)
     }
   } catch (err) {
     if (err instanceof CancelledError) cancelled = true
@@ -191,12 +225,19 @@ export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<Ren
     fs.rmSync(work, { recursive: true, force: true })
   }
 
-  if (!cancelled) writeSidecars(outDir, title, job, files)
-  return { outputDir: outDir, files, cancelled }
+  if (!cancelled) writeSidecars(outDir, title, job, files, fullFile, originalFile)
+  return { outputDir: outDir, files, fullFile, originalFile, cancelled }
 }
 
 /** manifest.json for tooling and captions.txt with copy-paste titles and hashtags for each part. */
-function writeSidecars(outDir: string, title: string, job: RenderJob, files: string[]): void {
+function writeSidecars(
+  outDir: string,
+  title: string,
+  job: RenderJob,
+  files: string[],
+  fullFile?: string,
+  originalFile?: string
+): void {
   const { parts, settings, source } = job
   const manifest = {
     title: source.title,
@@ -204,7 +245,9 @@ function writeSidecars(outDir: string, title: string, job: RenderJob, files: str
     site: source.site,
     createdAt: new Date().toISOString(),
     settings,
-    parts: parts.map((p, i) => ({ ...p, file: path.basename(files[i] ?? '') }))
+    parts: parts.map((p, i) => ({ ...p, file: path.basename(files[i] ?? '') })),
+    full: fullFile ? { ...job.full?.part, file: path.basename(fullFile) } : undefined,
+    original: originalFile ? path.basename(originalFile) : undefined
   }
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2))
 
