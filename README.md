@@ -109,6 +109,10 @@ npm run dist:mac         # dmg + zip for macOS    -> dist/
 npm run dist:linux       # AppImage               -> dist/
 ```
 
+**Run without installing (portable):** `npm run pack:win` (or `pack:mac`) writes a ready-to-run app to
+`dist/win-unpacked/MovieToShort.exe` (`dist/mac-arm64/MovieToShort.app`). Make a Desktop shortcut to it and
+you have a one-click launch. Rebuild after pulling new code.
+
 On Windows, `dist:win` needs permission to create symbolic links (electron-builder unpacks its tooling with them).
 Turn on **Settings → System → For developers → Developer Mode** once, or run the command from an administrator
 terminal. The GitHub Actions workflow in `.github/workflows/build.yml` builds all platforms without any of this.

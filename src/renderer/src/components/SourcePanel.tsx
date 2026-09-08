@@ -20,6 +20,8 @@ interface Props {
   onAudioTrackChange: (index: number) => void
   ytdlp: YtDlpStatus | null
   onUpdateYtDlp: () => void
+  /** Forget the current video so the next one can be loaded. Settings are kept. */
+  onClear: () => void
 }
 
 const VIDEO_EXT = /\.(mp4|mkv|mov|avi|webm|m4v|ts|mts|m2ts|wmv|flv|mpg|mpeg|3gp|ogv|vob)$/i
@@ -48,11 +50,27 @@ export function SourcePanel(p: Props): JSX.Element {
       title="1. Source"
       subtitle="Paste a video link from 1,000+ sites, or drop any video file."
       right={
-        p.ytdlp && (
-          <Pill tone={p.ytdlp.installed ? 'ok' : 'warn'}>
-            {p.ytdlp.installed ? `yt-dlp ${p.ytdlp.version ?? ''}` : 'yt-dlp downloads on first use'}
-          </Pill>
-        )
+        <div className="row">
+          {p.ytdlp && (
+            <Pill tone={p.ytdlp.installed ? 'ok' : 'warn'}>
+              {p.ytdlp.installed ? `yt-dlp ${p.ytdlp.version ?? ''}` : 'yt-dlp downloads on first use'}
+            </Pill>
+          )}
+          {(p.source || url) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={p.busy}
+              title="Clear the current video and start with a new one (settings are kept)"
+              onClick={() => {
+                setUrl('')
+                p.onClear()
+              }}
+            >
+              ✕ New video
+            </Button>
+          )}
+        </div>
       }
     >
       <div className="tabs">

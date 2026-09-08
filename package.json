@@ -22,7 +22,9 @@
     "dist:win": "npm run icon && electron-vite build && electron-builder --win",
     "dist:mac": "npm run icon && electron-vite build && electron-builder --mac",
     "dist:linux": "npm run icon && electron-vite build && electron-builder --linux",
-    "test:integration": "node --import tsx tests/pipeline.integration.ts"
+    "test:integration": "node --import tsx tests/pipeline.integration.ts",
+    "pack:win": "npm run icon && electron-vite build && electron-builder --win --dir",
+    "pack:mac": "npm run icon && electron-vite build && electron-builder --mac --dir"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",

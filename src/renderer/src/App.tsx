@@ -155,6 +155,23 @@ export default function App(): JSX.Element {
     api.cancel()
   }, [])
 
+  /** Back to the empty state for the next video. Settings (look, output folder, cookies) stay. */
+  const clearSource = useCallback(() => {
+    api.cancel()
+    previewSeq.current++
+    setSource(null)
+    setSilences(null)
+    setPreview(null)
+    setPreviewLoading(false)
+    setPreviewError(null)
+    setRenderResult(null)
+    setRenderError(null)
+    setError(null)
+    setProgress(null)
+    setSelectedPart(1)
+    setPhase('idle')
+  }, [])
+
   const updateYtDlp = useCallback(async () => {
     setError(null)
     setPhase('loading')
@@ -312,6 +329,7 @@ export default function App(): JSX.Element {
             onAudioTrackChange={(index) => source && setSource({ ...source, audioStreamIndex: index })}
             ytdlp={ytdlp}
             onUpdateYtDlp={updateYtDlp}
+            onClear={clearSource}
           />
           <TrimPanel
             source={source}
