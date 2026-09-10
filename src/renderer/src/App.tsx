@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppInfo, ProgressEvent, RenderJob, RenderResult, Silence, SourceInfo, YtDlpStatus } from '@shared/types'
+import { DEFAULT_SETTINGS } from '@shared/types'
 import { planParts } from '@shared/plan'
+import { outputSize } from '@shared/output'
 import { api } from './lib/api'
 import { buildPartOverlays, ensureFonts } from './lib/overlays'
 import { useSettings } from './hooks/useSettings'
@@ -61,6 +63,12 @@ export default function App(): JSX.Element {
     if (settings.hardwareEncode && hwEncoder === undefined) api.detectEncoder().then(setHwEncoder)
   }, [settings.hardwareEncode, hwEncoder])
 
+  // ---- output frame ----
+  const frame = useMemo(
+    () => (source ? outputSize(source.displayWidth, source.displayHeight, settings.sizeMode) : null),
+    [source, settings.sizeMode]
+  )
+
   // ---- plan ----
   const parts = useMemo(
     () =>
@@ -72,12 +80,16 @@ export default function App(): JSX.Element {
             targetLengthSec: settings.targetLengthSec,
             maxLengthSec: settings.maxLengthSec,
             smartCut: settings.smartCut,
+            singleClip: settings.outputMode === 'single',
             silences: silences ?? undefined,
             searchWindowSec: settings.searchWindowSec
           })
         : [],
-    [source, settings.skipStartSec, settings.skipEndSec, settings.targetLengthSec, settings.maxLengthSec, settings.smartCut, silences, settings.searchWindowSec]
+    [source, settings.outputMode, settings.skipStartSec, settings.skipEndSec, settings.targetLengthSec, settings.maxLengthSec, settings.smartCut, silences, settings.searchWindowSec]
   )
+
+  /** One clip: either forced, or the trimmed range already fits in a single short. */
+  const single = settings.outputMode !== 'split' && parts.length === 1
 
   useEffect(() => {
     if (selectedPart > parts.length) setSelectedPart(Math.max(1, parts.length))
@@ -195,7 +207,7 @@ export default function App(): JSX.Element {
     setPreviewError(null)
     try {
       await ensureFonts()
-      const overlays = buildPartOverlays(settings, part, parts.length, source.title)
+      const overlays = buildPartOverlays(settings, part, parts.length, source.title, frame ?? undefined, single)
       const offset = moment === 'start' ? Math.min(1, part.duration / 2) : moment === 'middle' ? part.duration / 2 : Math.max(0, part.duration - 1.5)
       const img = await api.renderPreview({ source, settings, part, overlays, offsetSec: offset })
       if (img && seq === previewSeq.current) setPreview(img)
@@ -205,13 +217,13 @@ export default function App(): JSX.Element {
     } finally {
       if (seq === previewSeq.current) setPreviewLoading(false)
     }
-  }, [source, parts, selectedPart, settings, moment])
+  }, [source, parts, selectedPart, settings, moment, frame, single])
 
   const previewKey = useMemo(() => {
     const part = parts.find((x) => x.index === selectedPart)
     const { outputDir: _o, quality: _q, fpsMode: _f, hardwareEncode: _h, normalizeAudio: _n, cookiesBrowser: _c, cookiesFile: _cf, saveFullVideo: _sf, keepOriginal: _ko, ...look } = settings
     return JSON.stringify([source?.path, part?.start, part?.duration, parts.length, moment, look])
-  }, [source, parts, selectedPart, settings, moment])
+  }, [source, parts, selectedPart, settings, moment, frame, single])
 
   useEffect(() => {
     if (!source || phase === 'rendering') return
@@ -230,14 +242,17 @@ export default function App(): JSX.Element {
     setProgress({ kind: 'render', partIndex: 1, totalParts: parts.length, partPercent: 0, overallPercent: 0, message: 'Preparing…' })
     try {
       await ensureFonts()
-      const overlays = parts.map((part) => buildPartOverlays(settings, part, parts.length, source.title))
+      const overlays = parts.map((part) => buildPartOverlays(settings, part, parts.length, source.title, frame ?? undefined, single))
       let full: RenderJob['full']
       if (settings.saveFullVideo) {
         const start = parts[0].start
         const end = parts[parts.length - 1].end
         const fullPart = { index: 1, start, end, duration: Math.round((end - start) * 1000) / 1000, snappedStart: false, snappedEnd: false }
         // Same look as the parts, minus the part badge and the next-part teaser.
-        full = { part: fullPart, overlays: buildPartOverlays({ ...settings, badgeEnabled: false, teaserEnabled: false }, fullPart, 1, source.title) }
+        full = {
+          part: fullPart,
+          overlays: buildPartOverlays({ ...settings, teaserEnabled: false }, fullPart, 1, source.title, frame ?? undefined, true)
+        }
       }
       const res = await api.startRender({ source, settings, parts, overlays, full })
       setRenderResult(res)
@@ -247,17 +262,19 @@ export default function App(): JSX.Element {
     } finally {
       setPhase('idle')
     }
-  }, [source, parts, settings])
+  }, [source, parts, settings, frame, single])
 
   // ---- smoke test driver (MOVIETOSHORT_SMOKE_FILE): load -> analyze -> preview -> optional render ----
   useEffect(() => {
     const smoke = info?.smoke
     if (!smoke?.file || smokeStep.current !== 'idle') return
     smokeStep.current = 'loading'
+    // Start from the defaults so a smoke run never depends on what this machine has saved.
     update({
-      outputDir: smoke.outputDir || settings.outputDir || info!.defaultOutputDir,
+      ...DEFAULT_SETTINGS,
+      outputDir: smoke.outputDir || info!.defaultOutputDir,
       targetLengthSec: 15,
-      titleEnabled: true,
+      outputMode: smoke.single ? 'single' : 'auto',
       watermarkEnabled: true,
       saveFullVideo: true,
       quality: 'fast'
@@ -342,7 +359,13 @@ export default function App(): JSX.Element {
             onAnalyze={() => source && analyze(source)}
             onCancel={cancel}
           />
-          <PlanPanel parts={parts} selected={selectedPart} onSelect={setSelectedPart} smartCut={settings.smartCut && silences !== null} />
+          <PlanPanel
+            parts={parts}
+            selected={selectedPart}
+            onSelect={setSelectedPart}
+            smartCut={settings.smartCut && silences !== null}
+            single={single}
+          />
         </div>
 
         <div className="column column-preview">
@@ -361,7 +384,14 @@ export default function App(): JSX.Element {
         </div>
 
         <div className="column">
-          <StylePanel settings={settings} update={update} disabled={phase === 'rendering'} sourceTitle={source?.title} />
+          <StylePanel
+            settings={settings}
+            update={update}
+            disabled={phase === 'rendering'}
+            sourceTitle={source?.title}
+            frame={frame}
+            single={single}
+          />
           <ExportPanel
             settings={settings}
             update={update}

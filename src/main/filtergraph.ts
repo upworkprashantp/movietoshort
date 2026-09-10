@@ -1,13 +1,5 @@
 import type { BadgePosition, Settings } from '@shared/types'
-
-export const OUT_W = 1080
-export const OUT_H = 1920
-
-/**
- * Safe zones (px, at 1080x1920) that stay clear of the Shorts / Reels / TikTok UI:
- * top bar, bottom title/caption area and the right-hand action column.
- */
-export const SAFE = { side: 64, top: 190, bottom: 440, rightColumn: 200 }
+import { outputSize, safeZones, sameAspect, type SafeZones } from '@shared/output'
 
 export interface OverlayFile {
   path: string
@@ -15,6 +7,8 @@ export interface OverlayFile {
   from?: number
   to?: number
   fadeIn?: number
+  fadeOut?: number
+  animate?: 'rise'
   offsetY?: number
 }
 
@@ -54,8 +48,8 @@ export function hexToFfmpeg(hex: string, alpha?: number): string {
 }
 
 /** overlay x/y expressions for a position inside the safe zones. W/H = main, w/h = overlay. */
-export function positionExpr(position: BadgePosition, offsetY = 0): { x: string; y: string } {
-  const { side, top, bottom, rightColumn } = SAFE
+export function positionExpr(position: BadgePosition, safe: SafeZones, offsetY = 0): { x: string; y: string } {
+  const { side, top, bottom, rightColumn } = safe
   const dy = offsetY ? (offsetY > 0 ? `+${offsetY}` : `${offsetY}`) : ''
   switch (position) {
     case 'top-left':
@@ -81,8 +75,10 @@ export function positionExpr(position: BadgePosition, offsetY = 0): { x: string;
  */
 export function buildGraph(o: GraphOptions): Graph {
   const s = o.settings
-  const W = OUT_W
-  const H = OUT_H
+  const size = outputSize(o.srcW, o.srcH, s.sizeMode)
+  const W = size.width
+  const H = size.height
+  const safe = safeZones(size)
   const chains: string[] = []
   const inputArgs: string[] = []
   const preview = o.previewOffset !== undefined
@@ -96,7 +92,10 @@ export function buildGraph(o: GraphOptions): Graph {
 
   // --- layout ---
   const aspect = o.srcW / o.srcH
-  if (s.layout === 'fill') {
+  if (sameAspect(o.srcW, o.srcH, W, H)) {
+    // Already the right shape (a Reel, a TikTok, a Short): no bars, no crop, no re-framing.
+    chains.push(`[src]scale=${W}:${H}:flags=lanczos,setsar=1[base]`)
+  } else if (s.layout === 'fill') {
     const x = s.cropFocus === 'left' ? '0' : s.cropFocus === 'right' ? 'iw-ow' : '(iw-ow)/2'
     chains.push(
       `[src]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:x=${x}:y=(ih-oh)/2,setsar=1[base]`
@@ -136,12 +135,28 @@ export function buildGraph(o: GraphOptions): Graph {
     inputArgs.push('-loop', '1', '-framerate', '25', '-t', stillDuration, '-i', ov.path)
     let src = `[${inputIndex}:v]`
     const hasWindow = ov.from !== undefined || ov.to !== undefined
+    const fades: string[] = []
     if (!preview && ov.fadeIn && ov.from !== undefined) {
-      chains.push(`[${inputIndex}:v]format=rgba,fade=t=in:st=${ov.from}:d=${ov.fadeIn}:alpha=1[ov${inputIndex}]`)
+      fades.push(`fade=t=in:st=${ov.from}:d=${ov.fadeIn}:alpha=1`)
+    }
+    if (!preview && ov.fadeOut && ov.to !== undefined) {
+      fades.push(`fade=t=out:st=${Math.max(0, ov.to - ov.fadeOut)}:d=${ov.fadeOut}:alpha=1`)
+    }
+    if (fades.length) {
+      chains.push(`[${inputIndex}:v]format=rgba,${fades.join(',')}[ov${inputIndex}]`)
       src = `[ov${inputIndex}]`
     }
-    const { x, y } = positionExpr(ov.position, ov.offsetY)
-    let f = `${cur}${src}overlay=x=${x}:y=${y}:format=auto:shortest=1`
+    const { x, y } = positionExpr(ov.position, safe, ov.offsetY)
+    let yExpr = y
+    if (!preview && ov.animate === 'rise') {
+      // Slides up into place over the first 0.4 s it is on screen.
+      const from = ov.from ?? 0
+      const rise = Math.round(28 * size.uiScale)
+      // The comma inside the expression must reach ffmpeg escaped, or it reads as a filter separator.
+      yExpr = `(${y})+${rise}*max(0\\,1-(t-${from})/0.4)`
+    }
+    let f = `${cur}${src}overlay=x=${x}:y=${yExpr}:format=auto:shortest=1`
+    if (!preview && ov.animate === 'rise') f += ':eval=frame'
     if (hasWindow) {
       const from = ov.from ?? 0
       const to = ov.to ?? dur + 1
@@ -154,7 +169,7 @@ export function buildGraph(o: GraphOptions): Graph {
 
   // --- progress bar: a full-width strip that slides in from the left as time passes ---
   if (s.progressBarEnabled) {
-    const h = 10
+    const h = Math.max(4, Math.round(10 * size.uiScale))
     chains.push(`color=c=${hexToFfmpeg(s.progressBarColor)}:s=${W}x${h}:r=25:d=${stillDuration}[bar]`)
     chains.push(`${cur}[bar]overlay=x=-${W}+${W}*t/${dur.toFixed(3)}:y=${H - h}:eval=frame:format=auto:shortest=1[pb]`)
     cur = '[pb]'

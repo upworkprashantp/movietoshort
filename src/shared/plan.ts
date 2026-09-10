@@ -9,6 +9,8 @@ export interface PlanOptions {
   /** Hard cap per part (platform limit). */
   maxLengthSec: number
   smartCut: boolean
+  /** Produce one clip for the whole trimmed range instead of splitting it. */
+  singleClip?: boolean
   silences?: Silence[]
   /** How far (seconds) a cut may move from the ideal point to land on a silence. */
   searchWindowSec: number
@@ -30,6 +32,19 @@ export function planParts(o: PlanOptions): PartPlan[] {
   const end = clamp(duration - Math.max(0, o.skipEndSec), 0, duration)
   const range = end - start
   if (range < 1) return []
+
+  if (o.singleClip) {
+    return [
+      {
+        index: 1,
+        start: round3(start),
+        end: round3(end),
+        duration: round3(range),
+        snappedStart: false,
+        snappedEnd: false
+      }
+    ]
+  }
 
   const maxLen = Math.max(5, o.maxLengthSec)
   const target = clamp(o.targetLengthSec, 5, maxLen)

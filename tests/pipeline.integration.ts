@@ -15,6 +15,7 @@ import { videoEncoderArgs, AUDIO_ARGS } from '../src/shared/encoding'
 import { DEFAULT_SETTINGS } from '../src/shared/types'
 import { formatFfmpegTime } from '../src/shared/time'
 import { parseSilenceOutput, planParts } from '../src/shared/plan'
+import { outputSize } from '../src/shared/output'
 
 const ff = String(ffmpegStatic)
 const ffprobe = ffprobeStatic.path
@@ -95,5 +96,56 @@ for (const layout of ['blur', 'fill', 'solid'] as const) {
   check(r.code === 0 && fs.existsSync(out) && fs.statSync(out).size > 10_000, 'preview frame', r.code === 0 ? `${fs.statSync(out).size} bytes` : r.err.trim())
 }
 
-console.log(`\nartifacts in ${dir}`)
+// ---------------------------------------------------------------------------
+// 5. A source that is already vertical: single clip, kept at its own size,
+//    with an animated intro and an end call-to-action.
+// ---------------------------------------------------------------------------
+{
+  const vert = path.join(dir, 'vertical.mp4')
+  run(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1080x1920:rate=30', '-f', 'lavfi', '-i',
+    'sine=frequency=300:sample_rate=48000', '-t', '20', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', vert])
+  check(fs.existsSync(vert), 'vertical source created')
+
+  const size = outputSize(1080, 1920, 'auto')
+  check(size.keptSource && size.width === 1080 && size.height === 1920, 'vertical source keeps its frame', `${size.width}x${size.height}`)
+
+  const part = planParts({
+    durationSec: 20, skipStartSec: 0, skipEndSec: 0, targetLengthSec: 120,
+    maxLengthSec: 180, smartCut: false, searchWindowSec: 10
+  })[0]
+  check(!!part && part.duration === 20, 'short video plans as one clip')
+
+  const graph = buildGraph({
+    settings: { ...DEFAULT_SETTINGS, badgeEnabled: false, teaserEnabled: false },
+    srcW: 1080, srcH: 1920, storedW: 1080, storedH: 1920,
+    videoStreamIndex: 0, audioStreamIndex: 1, fps: null, partDuration: part.duration,
+    overlays: [
+      { path: path.join(dir, 'badge.png'), position: 'top-center', from: 0, to: 3, fadeIn: 0.35, fadeOut: 0.5, animate: 'rise' },
+      { path: path.join(dir, 'teaser.png'), position: 'bottom-center', from: 17, to: 21, fadeIn: 0.35, animate: 'rise' }
+    ]
+  })
+  check(graph.filterComplex.includes('scale=1080:1920:flags=lanczos'), 'no re-framing: straight scale to the source frame')
+  check(!graph.filterComplex.includes('gblur'), 'no blurred backdrop when the frame already fits')
+
+  const out = path.join(dir, 'single.mp4')
+  const t0 = Date.now()
+  const r = run(ff, ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-ss', formatFfmpegTime(part.start), '-t', formatFfmpegTime(part.duration), '-i', vert,
+    ...graph.inputArgs, '-filter_complex', graph.filterComplex, '-map', graph.videoLabel, '-map', graph.audioLabel!,
+    ...videoEncoderArgs(null, 'fast'), '-pix_fmt', 'yuv420p', '-fps_mode', 'cfr', ...AUDIO_ARGS, '-movflags', '+faststart', out])
+  if (r.code !== 0) {
+    check(false, 'render single clip', r.err.trim().split('\n').slice(-3).join(' | '))
+    console.log('   graph:', graph.filterComplex)
+  } else {
+    const probe = run(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type,width,height:format=duration', '-of', 'json', out])
+    const info = JSON.parse(probe.out) as { streams: Array<{ codec_type: string; width?: number; height?: number }>; format: { duration: string } }
+    const v = info.streams.find((s) => s.codec_type === 'video')
+    const durOk = Math.abs(Number(info.format.duration) - part.duration) < 0.3
+    check(v?.width === 1080 && v?.height === 1920 && durOk, 'render single clip',
+      `${((Date.now() - t0) / 1000).toFixed(1)}s, ${v?.width}x${v?.height}, duration=${Number(info.format.duration).toFixed(2)}s`)
+  }
+}
+
+console.log(`
+artifacts in ${dir}
+`)
 process.exit(failed ? 1 : 0)

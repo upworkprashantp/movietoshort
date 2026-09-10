@@ -18,7 +18,7 @@ import type {
 import { formatFfmpegTime, formatTime } from '@shared/time'
 import { padWidth, renderTemplate, safeFileName } from '@shared/plan'
 
-const OVERLAY_ORDER: Array<keyof PartOverlays> = ['badge', 'title', 'watermark', 'teaser']
+const OVERLAY_ORDER: Array<keyof PartOverlays> = ['badge', 'title', 'watermark', 'intro', 'teaser', 'cta']
 
 function writeDataUrl(dataUrl: string, file: string): void {
   const comma = dataUrl.indexOf(',')
@@ -33,7 +33,16 @@ function materialiseOverlays(overlays: PartOverlays, dir: string, tag: string): 
     if (!ov) continue
     const file = path.join(dir, `${tag}-${key}.png`)
     writeDataUrl(ov.dataUrl, file)
-    out.push({ path: file, position: ov.position, from: ov.from, to: ov.to, fadeIn: ov.fadeIn, offsetY: ov.offsetY })
+    out.push({
+      path: file,
+      position: ov.position,
+      from: ov.from,
+      to: ov.to,
+      fadeIn: ov.fadeIn,
+      fadeOut: ov.fadeOut,
+      animate: ov.animate,
+      offsetY: ov.offsetY
+    })
   }
   return out
 }

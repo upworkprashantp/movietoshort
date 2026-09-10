@@ -63,11 +63,16 @@ export type BadgePosition =
 export type LabelStyle = 'pill' | 'outline' | 'shadow'
 export type LabelSize = 'small' | 'medium' | 'large'
 export type QualityPreset = 'fast' | 'balanced' | 'high'
+/** How many files to produce: split into parts, one clip, or decide from the source length. */
+export type OutputMode = 'auto' | 'split' | 'single'
+/** 'auto' keeps portrait/square sources at their own size and converts landscape to 9:16. */
+export type SizeMode = 'auto' | 'vertical' | 'source'
 export type FpsMode = 'source' | '30' | '60'
 export type CookiesBrowser = 'none' | 'chrome' | 'firefox' | 'edge' | 'safari' | 'brave'
 
 export interface Settings {
   // trimming / splitting
+  outputMode: OutputMode
   skipStartSec: number
   skipEndSec: number
   targetLengthSec: number
@@ -76,6 +81,7 @@ export interface Settings {
   searchWindowSec: number
 
   // look
+  sizeMode: SizeMode
   layout: Layout
   cropFocus: CropFocus
   fgScale: number // 1.0 - 1.6, only for blur/solid
@@ -100,6 +106,15 @@ export interface Settings {
 
   teaserEnabled: boolean
   teaserSeconds: number
+
+  // branding (mainly for single-clip exports, where there is no part number)
+  introEnabled: boolean
+  introText: string
+  introSeconds: number
+
+  ctaEnabled: boolean
+  ctaText: string
+  ctaSeconds: number
 
   // audio
   normalizeAudio: boolean
@@ -126,6 +141,7 @@ export interface YtAuth {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  outputMode: 'auto',
   skipStartSec: 0,
   skipEndSec: 0,
   targetLengthSec: 120,
@@ -133,6 +149,7 @@ export const DEFAULT_SETTINGS: Settings = {
   smartCut: true,
   searchWindowSec: 12,
 
+  sizeMode: 'auto',
   layout: 'blur',
   cropFocus: 'center',
   fgScale: 1.0,
@@ -158,6 +175,14 @@ export const DEFAULT_SETTINGS: Settings = {
   teaserEnabled: true,
   teaserSeconds: 3,
 
+  introEnabled: true,
+  introText: '',
+  introSeconds: 3,
+
+  ctaEnabled: true,
+  ctaText: 'Follow for more',
+  ctaSeconds: 3,
+
   normalizeAudio: true,
 
   quality: 'balanced',
@@ -180,6 +205,10 @@ export interface OverlayImage {
   to?: number
   /** Fade in over this many seconds when it appears (render only). */
   fadeIn?: number
+  /** Fade out over this many seconds before it disappears (render only). */
+  fadeOut?: number
+  /** Small upward slide as it appears. */
+  animate?: 'rise'
   /** Extra vertical offset in px (positive moves down). */
   offsetY?: number
 }
@@ -189,6 +218,8 @@ export interface PartOverlays {
   title?: OverlayImage
   watermark?: OverlayImage
   teaser?: OverlayImage
+  intro?: OverlayImage
+  cta?: OverlayImage
 }
 
 export interface RenderJob {
@@ -207,6 +238,14 @@ export interface PreviewRequest {
   overlays: PartOverlays
   /** Seconds into the part to grab the frame from. */
   offsetSec: number
+}
+
+/** Everything the renderer and the preview need to agree on about the output frame. */
+export interface FrameInfo {
+  width: number
+  height: number
+  uiScale: number
+  keptSource: boolean
 }
 
 export type ProgressEvent =
@@ -245,7 +284,7 @@ export interface AppInfo {
   ffmpegPath: string
   ffprobePath: string
   /** Present only when the app was started in smoke-test mode (see README). */
-  smoke?: { file?: string; render?: boolean; outputDir?: string }
+  smoke?: { file?: string; render?: boolean; single?: boolean; outputDir?: string }
 }
 
 export interface EncoderInfo {

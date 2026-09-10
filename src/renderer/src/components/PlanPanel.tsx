@@ -8,6 +8,8 @@ interface Props {
   selected: number
   onSelect: (index: number) => void
   smartCut: boolean
+  /** True when the whole video goes out as one clip instead of numbered parts. */
+  single: boolean
 }
 
 export function PlanPanel(p: Props): JSX.Element {
@@ -17,8 +19,22 @@ export function PlanPanel(p: Props): JSX.Element {
   return (
     <Card
       title="3. Plan"
-      subtitle={p.parts.length ? `${p.parts.length} parts · average ${formatTime(avg)} · ${formatTime(total)} total` : 'Load a video to see the parts.'}
-      right={p.smartCut && p.parts.length > 1 ? <Pill tone={snapped ? 'ok' : 'muted'}>{snapped}/{p.parts.length - 1} cuts on pauses</Pill> : undefined}
+      subtitle={
+        !p.parts.length
+          ? 'Load a video to see the parts.'
+          : p.single
+            ? `One clip · ${formatTime(total)} · already short enough, exported whole`
+            : `${p.parts.length} parts · average ${formatTime(avg)} · ${formatTime(total)} total`
+      }
+      right={
+        p.single ? (
+          <Pill tone="accent">Single clip</Pill>
+        ) : p.smartCut && p.parts.length > 1 ? (
+          <Pill tone={snapped ? 'ok' : 'muted'}>
+            {snapped}/{p.parts.length - 1} cuts on pauses
+          </Pill>
+        ) : undefined
+      }
       className="card-scroll"
     >
       <ol className="plan-list">

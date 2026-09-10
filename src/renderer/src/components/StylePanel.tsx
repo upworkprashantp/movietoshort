@@ -1,12 +1,17 @@
 import React from 'react'
-import type { BadgePosition, CropFocus, LabelSize, LabelStyle, Layout, Settings } from '@shared/types'
-import { Card, ColorInput, Field, Segmented, Slider, Toggle } from './ui'
+import type { BadgePosition, CropFocus, LabelSize, LabelStyle, Layout, Settings, SizeMode } from '@shared/types'
+import type { OutputSize } from '@shared/output'
+import { Card, ColorInput, Field, Pill, Segmented, Slider, Toggle } from './ui'
 
 interface Props {
   settings: Settings
   update: (patch: Partial<Settings>) => void
   disabled: boolean
   sourceTitle?: string
+  /** The frame the current source will be rendered into, or null when nothing is loaded. */
+  frame: OutputSize | null
+  /** True when the export is one clip rather than numbered parts. */
+  single: boolean
 }
 
 const POSITIONS: Array<{ value: BadgePosition; label: string }> = [
@@ -22,7 +27,38 @@ export function StylePanel(p: Props): JSX.Element {
   const s = p.settings
   const d = p.disabled
   return (
-    <Card title="4. Look" subtitle="Vertical 9:16 layout, part badge and retention extras.">
+    <Card
+      title="4. Look"
+      subtitle="Frame, badges and retention extras."
+      right={
+        p.frame ? (
+          <Pill tone={p.frame.keptSource ? 'ok' : 'muted'}>
+            {p.frame.width}×{p.frame.height}
+            {p.frame.keptSource ? ' · kept' : ''}
+          </Pill>
+        ) : undefined
+      }
+    >
+      <Field
+        label="Output size"
+        hint={
+          p.frame?.keptSource
+            ? 'This video is already upright, so it is exported at its own size.'
+            : 'Landscape video is re-framed to the vertical 1080×1920 canvas.'
+        }
+      >
+        <Segmented<SizeMode>
+          value={s.sizeMode}
+          disabled={d}
+          onChange={(v) => p.update({ sizeMode: v })}
+          options={[
+            { value: 'auto', label: 'Auto', title: 'Keep upright videos as they are, convert landscape to 9:16' },
+            { value: 'vertical', label: '1080×1920', title: 'Always output the full vertical canvas' },
+            { value: 'source', label: 'Keep source', title: 'Never re-frame, always keep the original shape' }
+          ]}
+        />
+      </Field>
+
       <Field label="Layout">
         <Segmented<Layout>
           value={s.layout}
@@ -35,6 +71,11 @@ export function StylePanel(p: Props): JSX.Element {
           ]}
         />
       </Field>
+      {p.frame?.keptSource && (
+        <p className="muted small">
+          The picture already fills this frame, so the layout below only applies if you switch the output size.
+        </p>
+      )}
       {s.layout === 'fill' ? (
         <Field label="Keep" hint="which side of the wide frame to keep">
           <Segmented<CropFocus>
@@ -67,8 +108,14 @@ export function StylePanel(p: Props): JSX.Element {
 
       <hr />
 
-      <Toggle checked={s.badgeEnabled} disabled={d} onChange={(v) => p.update({ badgeEnabled: v })} label="Part number badge" />
-      {s.badgeEnabled && (
+      <Toggle
+        checked={s.badgeEnabled}
+        disabled={d || p.single}
+        onChange={(v) => p.update({ badgeEnabled: v })}
+        label="Part number badge"
+        hint={p.single ? 'Not used: a single clip has no part number.' : undefined}
+      />
+      {s.badgeEnabled && !p.single && (
         <div className="indent">
           <div className="grid-2">
             <Field label="Text" hint="{n} = part, {total} = count">
@@ -133,8 +180,58 @@ export function StylePanel(p: Props): JSX.Element {
         </div>
       )}
 
-      <Toggle checked={s.teaserEnabled} disabled={d} onChange={(v) => p.update({ teaserEnabled: v })} label="“Part N ▶” teaser at the end" hint="Shown in the last seconds of every part except the final one." />
-      {s.teaserEnabled && (
+      <hr />
+
+      <Toggle
+        checked={s.introEnabled}
+        disabled={d || s.titleEnabled}
+        onChange={(v) => p.update({ introEnabled: v })}
+        label="Intro title"
+        hint={
+          s.titleEnabled
+            ? 'Turned off while “Title at the top” is on, they would sit in the same place.'
+            : 'Slides in over the first seconds, then fades. Defaults to the video title.'
+        }
+      />
+      {s.introEnabled && !s.titleEnabled && (
+        <div className="indent">
+          <input
+            className="input"
+            value={s.introText}
+            placeholder={p.sourceTitle ?? 'Video title'}
+            disabled={d}
+            onChange={(e) => p.update({ introText: e.target.value })}
+          />
+          <Field label="On screen for">
+            <Slider value={s.introSeconds} min={1} max={8} step={1} disabled={d} onChange={(v) => p.update({ introSeconds: v })} format={(v) => `${v}s`} />
+          </Field>
+        </div>
+      )}
+
+      <Toggle
+        checked={s.ctaEnabled}
+        disabled={d}
+        onChange={(v) => p.update({ ctaEnabled: v })}
+        label="Call to action at the end"
+        hint="Fades in at the end. On numbered parts the “Part N ▶” teaser is used instead."
+      />
+      {s.ctaEnabled && (
+        <div className="indent">
+          <input className="input" value={s.ctaText} disabled={d} onChange={(e) => p.update({ ctaText: e.target.value })} />
+          <Field label="On screen for">
+            <Slider value={s.ctaSeconds} min={1} max={8} step={1} disabled={d} onChange={(v) => p.update({ ctaSeconds: v })} format={(v) => `${v}s`} />
+          </Field>
+        </div>
+      )}
+
+      <Toggle
+        checked={s.teaserEnabled}
+        disabled={d || p.single}
+        onChange={(v) => p.update({ teaserEnabled: v })}
+        label="“Part N ▶” teaser at the end"
+        hint={p.single ? 'Not used: this export is a single clip.' : 'Shown in the last seconds of every part except the final one.'}
+      />
+      {s.teaserEnabled && !p.single && (
         <div className="indent">
           <Slider value={s.teaserSeconds} min={2} max={8} step={1} disabled={d} onChange={(v) => p.update({ teaserSeconds: v })} format={(v) => `${v}s`} />
         </div>

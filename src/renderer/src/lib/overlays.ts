@@ -1,5 +1,6 @@
 import type { LabelSize, LabelStyle, PartOverlays, PartPlan, Settings, BadgePosition } from '@shared/types'
 import { renderTemplate } from '@shared/plan'
+import type { OutputSize } from '@shared/output'
 
 /** All overlays are drawn at the output resolution (1080x1920) so nothing is resampled by ffmpeg. */
 export const FONT_STACK = '"Inter", "Segoe UI", "SF Pro Display", "Helvetica Neue", Arial, sans-serif'
@@ -128,29 +129,47 @@ export function contrastColor(hex: string): string {
   return lum > 0.62 ? '#111111' : '#ffffff'
 }
 
-interface Stack {
-  [pos: string]: number
+interface Placed {
+  from: number
+  to: number
+  height: number
 }
 
+const GAP = 18
+
 /**
- * Build every overlay for one part. Items sharing a position are stacked so they never overlap:
- * top positions grow downward, bottom positions grow upward.
+ * Build every overlay for one part.
+ *
+ * Items sharing a position are stacked so they never overlap: top positions grow downward,
+ * bottom positions grow upward. Only items that are on screen at the same time push each
+ * other, so a 3-second intro and an end call-to-action can share the same spot.
  */
-export function buildPartOverlays(settings: Settings, part: PartPlan, total: number, title: string): PartOverlays {
+export function buildPartOverlays(
+  settings: Settings,
+  part: PartPlan,
+  total: number,
+  title: string,
+  frame: OutputSize = { width: 1080, height: 1920, uiScale: 1, keptSource: false },
+  single = false
+): PartOverlays {
   const out: PartOverlays = {}
-  const stack: Stack = {}
-  const place = (pos: BadgePosition, img: LabelImage): number => {
-    const used = stack[pos] ?? 0
-    const gap = 18
-    const offset = pos.startsWith('top') ? used : -used
-    stack[pos] = used + img.height + gap
-    return offset
+  const stacks: Record<string, Placed[]> = {}
+  const k = frame.uiScale
+  const px = (n: number): number => Math.max(8, Math.round(n * k))
+
+  const place = (pos: BadgePosition, img: LabelImage, from = 0, to = Number.MAX_SAFE_INTEGER): number => {
+    const list = (stacks[pos] ??= [])
+    const overlapping = list.filter((o) => from < o.to && to > o.from)
+    const used = overlapping.reduce((sum, o) => sum + o.height + GAP * k, 0)
+    list.push({ from, to, height: img.height })
+    return Math.round(pos.startsWith('top') ? used : -used)
   }
 
-  if (settings.badgeEnabled) {
+  // A single clip has no part number and no next part to tease.
+  if (settings.badgeEnabled && !single) {
     const text = renderTemplate(settings.badgeTemplate || 'Part {n}', part.index, total) || `Part ${part.index}`
     const img = makeLabel(text, {
-      fontSize: BADGE_FONT_SIZE[settings.badgeSize],
+      fontSize: px(BADGE_FONT_SIZE[settings.badgeSize]),
       style: settings.badgeStyle,
       accent: settings.badgeAccent,
       textColor: settings.badgeStyle === 'pill' ? contrastColor(settings.badgeAccent) : '#ffffff'
@@ -160,17 +179,17 @@ export function buildPartOverlays(settings: Settings, part: PartPlan, total: num
 
   if (settings.titleEnabled && (settings.titleText || title).trim()) {
     const img = makeLabel((settings.titleText || title).trim(), {
-      fontSize: 52,
+      fontSize: px(52),
       style: 'outline',
       accent: settings.badgeAccent,
-      maxWidth: 900
+      maxWidth: frame.width - px(150)
     })
     out.title = { dataUrl: img.dataUrl, position: 'top-center', offsetY: place('top-center', img) }
   }
 
   if (settings.watermarkEnabled && settings.watermarkText.trim()) {
     const img = makeLabel(settings.watermarkText.trim(), {
-      fontSize: 34,
+      fontSize: px(34),
       style: 'shadow',
       accent: settings.badgeAccent,
       weight: 700,
@@ -179,21 +198,73 @@ export function buildPartOverlays(settings: Settings, part: PartPlan, total: num
     out.watermark = { dataUrl: img.dataUrl, position: 'bottom-center', offsetY: place('bottom-center', img) }
   }
 
-  if (settings.teaserEnabled && part.index < total && part.duration > settings.teaserSeconds + 2) {
+  // Intro: the title (or your own hook line) slides in over the opening seconds and fades away.
+  if (settings.introEnabled && !settings.titleEnabled) {
+    const text = (settings.introText || title).trim()
+    const shown = Math.min(settings.introSeconds, Math.max(1, part.duration - 1))
+    if (text && shown >= 1) {
+      const img = makeLabel(text, {
+        fontSize: px(56),
+        style: 'pill',
+        accent: settings.badgeAccent,
+        textColor: contrastColor(settings.badgeAccent),
+        maxWidth: frame.width - px(200)
+      })
+      const to = Math.round(shown * 100) / 100
+      out.intro = {
+        dataUrl: img.dataUrl,
+        position: 'top-center',
+        offsetY: place('top-center', img, 0, to),
+        from: 0,
+        to,
+        fadeIn: 0.35,
+        fadeOut: 0.5,
+        animate: 'rise'
+      }
+    }
+  }
+
+  if (settings.teaserEnabled && !single && part.index < total && part.duration > settings.teaserSeconds + 2) {
     const img = makeLabel(`Part ${part.index + 1} ▶`, {
-      fontSize: 50,
+      fontSize: px(50),
       style: 'pill',
       accent: '#ffffff',
       textColor: '#111111'
     })
     const from = Math.max(0, part.duration - settings.teaserSeconds)
+    const to = Math.ceil(part.duration + 1)
     out.teaser = {
       dataUrl: img.dataUrl,
       position: 'bottom-center',
-      offsetY: place('bottom-center', img),
+      offsetY: place('bottom-center', img, from, to),
       from: Math.round(from * 100) / 100,
-      to: Math.ceil(part.duration + 1),
+      to,
       fadeIn: 0.35
+    }
+  }
+
+  // Call to action at the end. On a numbered part the teaser already does that job.
+  if (settings.ctaEnabled && settings.ctaText.trim() && !out.teaser) {
+    const shown = Math.min(settings.ctaSeconds, Math.max(1, part.duration - 1))
+    if (shown >= 1) {
+      const img = makeLabel(settings.ctaText.trim(), {
+        fontSize: px(48),
+        style: 'pill',
+        accent: '#ffffff',
+        textColor: '#111111',
+        maxWidth: frame.width - px(200)
+      })
+      const from = Math.max(0, part.duration - shown)
+      const to = Math.ceil(part.duration + 1)
+      out.cta = {
+        dataUrl: img.dataUrl,
+        position: 'bottom-center',
+        offsetY: place('bottom-center', img, from, to),
+        from: Math.round(from * 100) / 100,
+        to,
+        fadeIn: 0.35,
+        animate: 'rise'
+      }
     }
   }
 

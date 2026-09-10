@@ -27,6 +27,23 @@
 
 Everything is previewed before you render, at the exact pixels that will be exported.
 
+### Already-short videos stay one clip
+
+Feed it a Reel, a TikTok or a Short and there is nothing to split. The app notices and switches to
+**single clip**: one file out, at the source's own size. A 1080×1080 square stays square, a 720×1280
+clip stays 720×1280. Nothing is re-framed, letterboxed or cropped, because the picture already fits.
+
+That clip still gets your branding:
+
+- **Intro title** slides up and fades in over the opening seconds, then fades away.
+- **Channel watermark** sits above the caption area for the whole clip.
+- **Call to action** ("Follow for more", or your own words) fades in at the end.
+- **Progress bar** along the bottom edge.
+
+The **Output** control in *Trim & split* forces the choice when you disagree: *Auto*, *Split into
+parts*, or *Single clip*. The **Output size** control in *Look* does the same for the frame: *Auto*,
+a full *1080×1920* canvas, or *Keep source*.
+
 ## Supported inputs
 
 | Input | Works with |
@@ -39,7 +56,7 @@ Everything is previewed before you render, at the exact pixels that will be expo
 
 | | |
 | --- | --- |
-| Resolution | 1080 × 1920 (9:16), the native size for Shorts, Reels, TikTok, Facebook Reels and Snapchat Spotlight |
+| Resolution | 1080 × 1920 (9:16) for landscape sources. Portrait and square sources keep their own frame, capped at 1920 tall. |
 | Video | H.264 High profile, CRF quality presets, source frame rate (capped at 60), `+faststart` |
 | Audio | AAC 192 kbps, 48 kHz stereo, loudness normalised to −14 LUFS / −1.5 dBTP |
 | Per part | `Title - Part 01.mp4` … plus `captions.txt` and `manifest.json` |
@@ -49,6 +66,12 @@ Everything is previewed before you render, at the exact pixels that will be expo
 This tool is built for creators who cut their **own** long-form videos into short-form: podcasts, streams, tutorials, vlogs, talks, gameplay, lectures. That is what grows a channel.
 
 Re-uploading other people's movies, shows or videos does not. Content ID catches it, the reused-content policy excludes it from monetisation, and repeated strikes remove channels. Only cut videos you made or have permission to use, and check each platform's rules before posting.
+
+**A watermark does not make someone else's video yours.** The branding options exist to put your name
+on your own work, not to disguise a re-upload. Content ID matches the picture and the audio, so a
+title card, a handle in the corner or a colour tweak changes nothing about a copyright claim. If you
+did not make the video and do not have permission, adding your logo makes the infringement easier to
+attribute to you, not harder.
 
 ## Download
 
@@ -138,6 +161,7 @@ src/
     render.ts       renders every part sequentially, writes manifest.json + captions.txt
     encoders.ts     hardware encoder detection (real test encode)
     ipc.ts          IPC handlers, one cancellable job at a time
+  shared/output.ts  output frame size, safe zones (portrait sources keep their own frame)
   preload/     contextBridge API (window.api)
   renderer/    React UI. Overlays (badge, title, watermark, teaser) are drawn on a <canvas>
                at 1080×1920 and sent to ffmpeg as PNGs, so any font/style works on any OS.

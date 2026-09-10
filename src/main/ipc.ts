@@ -51,6 +51,7 @@ export function registerIpc(getWindow: () => BrowserWindow): void {
       ? {
           file: process.env.MOVIETOSHORT_SMOKE_FILE,
           render: process.env.MOVIETOSHORT_SMOKE_RENDER === '1',
+          single: process.env.MOVIETOSHORT_SMOKE_SINGLE === '1',
           outputDir: process.env.MOVIETOSHORT_SMOKE_OUT
         }
       : undefined
