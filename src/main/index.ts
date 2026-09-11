@@ -60,8 +60,10 @@ function createWindow(): BrowserWindow {
       setTimeout(() => finish('done'), 800)
     })
     w.webContents.once('did-finish-load', () => {
-      const wait = process.env.MOVIETOSHORT_SMOKE_FILE ? 240_000 : 2_000
-      setTimeout(() => finish(process.env.MOVIETOSHORT_SMOKE_FILE ? 'timeout' : 'loaded'), wait)
+      // A scripted run (MOVIETOSHORT_SMOKE_FILE, or MOVIETOSHORT_SMOKE_FILES for Combine) reports
+      // 'smoke:done' itself, so this timer is only a safety net. A bare launch just screenshots.
+      const scripted = !!(process.env.MOVIETOSHORT_SMOKE_FILE || process.env.MOVIETOSHORT_SMOKE_FILES)
+      setTimeout(() => finish(scripted ? 'timeout' : 'loaded'), scripted ? 240_000 : 2_000)
     })
   }
   return w

@@ -1,5 +1,5 @@
 import type { BadgePosition, Settings } from '@shared/types'
-import { outputSize, safeZones, sameAspect, type SafeZones } from '@shared/output'
+import { outputSize, safeZones, sameAspect, type OutputSize, type SafeZones } from '@shared/output'
 
 export interface OverlayFile {
   path: string
@@ -28,6 +28,8 @@ export interface GraphOptions {
   overlays: OverlayFile[]
   /** When set, build a single-frame preview whose clock reads this many seconds into the part. */
   previewOffset?: number
+  /** Force this output frame. Clips joined into one video must all land on the same frame. */
+  outSize?: { width: number; height: number }
 }
 
 export interface Graph {
@@ -75,7 +77,14 @@ export function positionExpr(position: BadgePosition, safe: SafeZones, offsetY =
  */
 export function buildGraph(o: GraphOptions): Graph {
   const s = o.settings
-  const size = outputSize(o.srcW, o.srcH, s.sizeMode)
+  const size: OutputSize = o.outSize
+    ? {
+        width: o.outSize.width,
+        height: o.outSize.height,
+        uiScale: o.outSize.width / 1080,
+        keptSource: sameAspect(o.srcW, o.srcH, o.outSize.width, o.outSize.height)
+      }
+    : outputSize(o.srcW, o.srcH, s.sizeMode)
   const W = size.width
   const H = size.height
   const safe = safeZones(size)

@@ -5,16 +5,21 @@ import { ffmpegPath, ffprobePath } from './binaries'
 import { probeFile } from './probe'
 import * as ytdlp from './ytdlp'
 import { detectSilences } from './silence'
-import { renderJob, renderPreview } from './render'
+import { renderJob, renderPreview, type RenderContext } from './render'
+import { renderCombine, renderHighlights, saveCopies } from './compose'
 import { detectHardwareEncoder } from './encoders'
 import { CancelledError } from './proc'
 import type {
   AppInfo,
+  AppMode,
+  CombineJob,
+  HighlightsJob,
   YtAuth,
   PreviewRequest,
   ProgressEvent,
   RenderJob,
   RenderResult,
+  SavedCopies,
   Silence,
   SourceInfo,
   YtDlpStatus
@@ -40,7 +45,28 @@ function friendly(err: unknown): never {
   throw new Error(msg)
 }
 
+const VIDEO_FILTERS = [
+  {
+    name: 'Video',
+    extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v', 'ts', 'mts', 'm2ts', 'wmv', 'flv', 'mpg', 'mpeg', '3gp', 'ogv', 'vob']
+  },
+  { name: 'All files', extensions: ['*'] }
+]
+
 export function registerIpc(getWindow: () => BrowserWindow): void {
+  /** Run a render-type job as the single active job, streaming progress to the window. */
+  const asJob = async <T>(fn: (ctx: RenderContext) => Promise<T>): Promise<T> => {
+    const win = getWindow()
+    const ctrl = startJob()
+    try {
+      return await fn({ signal: ctrl.signal, onProgress: (e) => send(win, e) })
+    } catch (err) {
+      friendly(err)
+    } finally {
+      if (job === ctrl) job = null
+    }
+  }
+
   ipcMain.handle('app:info', (): AppInfo => ({
     platform: process.platform as AppInfo['platform'],
     version: app.getVersion(),
@@ -50,6 +76,8 @@ export function registerIpc(getWindow: () => BrowserWindow): void {
     smoke: process.env.MOVIETOSHORT_SMOKE
       ? {
           file: process.env.MOVIETOSHORT_SMOKE_FILE,
+          files: process.env.MOVIETOSHORT_SMOKE_FILES?.split(path.delimiter).filter(Boolean),
+          mode: process.env.MOVIETOSHORT_SMOKE_MODE as AppMode | undefined,
           render: process.env.MOVIETOSHORT_SMOKE_RENDER === '1',
           single: process.env.MOVIETOSHORT_SMOKE_SINGLE === '1',
           outputDir: process.env.MOVIETOSHORT_SMOKE_OUT
@@ -61,15 +89,18 @@ export function registerIpc(getWindow: () => BrowserWindow): void {
     const res = await dialog.showOpenDialog(getWindow(), {
       title: 'Choose a video',
       properties: ['openFile'],
-      filters: [
-        {
-          name: 'Video',
-          extensions: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v', 'ts', 'mts', 'm2ts', 'wmv', 'flv', 'mpg', 'mpeg', '3gp', 'ogv', 'vob']
-        },
-        { name: 'All files', extensions: ['*'] }
-      ]
+      filters: VIDEO_FILTERS
     })
     return res.canceled ? null : res.filePaths[0]
+  })
+
+  ipcMain.handle('dialog:pickVideos', async (): Promise<string[]> => {
+    const res = await dialog.showOpenDialog(getWindow(), {
+      title: 'Choose videos to combine',
+      properties: ['openFile', 'multiSelections'],
+      filters: VIDEO_FILTERS
+    })
+    return res.canceled ? [] : res.filePaths
   })
 
   ipcMain.handle('dialog:pickDir', async (_e, current?: string) => {
@@ -162,17 +193,20 @@ export function registerIpc(getWindow: () => BrowserWindow): void {
     }
   })
 
-  ipcMain.handle('render:start', async (_e, req: RenderJob): Promise<RenderResult> => {
-    const win = getWindow()
-    const ctrl = startJob()
-    try {
-      return await renderJob(req, { signal: ctrl.signal, onProgress: (e) => send(win, e) })
-    } catch (err) {
-      friendly(err)
-    } finally {
-      if (job === ctrl) job = null
+  ipcMain.handle('render:start', (_e, req: RenderJob): Promise<RenderResult> => asJob((ctx) => renderJob(req, ctx)))
+  ipcMain.handle('render:highlights', (_e, req: HighlightsJob): Promise<RenderResult> => asJob((ctx) => renderHighlights(req, ctx)))
+  ipcMain.handle('render:combine', (_e, req: CombineJob): Promise<RenderResult> => asJob((ctx) => renderCombine(req, ctx)))
+
+  ipcMain.handle(
+    'files:saveCopies',
+    (_e, items: Array<{ path: string; title: string }>, outputDir: string, folder: string): SavedCopies => {
+      try {
+        return saveCopies(items, outputDir, folder)
+      } catch (err) {
+        friendly(err)
+      }
     }
-  })
+  )
 
   ipcMain.handle('job:cancel', () => {
     job?.abort()

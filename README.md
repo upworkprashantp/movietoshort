@@ -5,7 +5,7 @@
 <h1 align="center">MovieToShort</h1>
 
 <p align="center">
-  Turn any long video into numbered, vertical, ready-to-post clips for YouTube Shorts, Instagram Reels, TikTok and more.<br/>
+  Turn long videos into numbered shorts or a quick highlights recap, or combine many clips into one video, for YouTube Shorts, Instagram Reels, TikTok and more.<br/>
   Paste a link from 1,000+ sites or drop a file. Free, open source, runs entirely on your own computer.
 </p>
 
@@ -26,6 +26,41 @@
 5. **Post.** A `captions.txt` with ready-to-paste titles and hashtags for every part is written next to the videos.
 
 Everything is previewed before you render, at the exact pixels that will be exported.
+
+## Three modes
+
+Switch at the top of the window. The look, branding and output folder are shared by all three.
+
+| Mode | In | Out |
+| --- | --- | --- |
+| **Split** | One long video, link or file | Numbered shorts: Part 1, Part 2 … (described above) |
+| **Highlights** | One long video, link or file | One silent recap, for example 2 minutes of 2.5 second snippets spread from start to end |
+| **Combine** | Many links and files | One longer video, clip after clip, or simply every clip downloaded |
+
+### Highlights: a 30 minute video as a 2 minute recap
+
+Pick the recap length (30 s to 3 min) and the length of each snippet (1 to 5 s). The snippets are spread
+evenly from the first usable second to the last, so the recap walks through the whole video in order.
+A 30 minute video at 2 minutes with 2.5 second snippets gives 48 snippets, one about every 37 seconds.
+Skip start and skip end still apply.
+
+The recap is silent on purpose, because sound chopped into 2 second pieces is unpleasant to listen to.
+Add a trending sound in the Shorts, Reels or TikTok editor when you post.
+
+### Combine: many clips into one video
+
+Paste any number of links, one per line, and add or drop video files. Links download one at a time
+with their own progress. Reorder with the arrows, retry a failed link, stop and resume the queue.
+
+- **Combine into one video.** Clips of any size, frame rate or audio format are fitted to one frame and
+  joined in order. A clip without sound gets silence so everything after it stays in sync, and each
+  clip's loudness is evened out so no creator is louder than the rest. Clips that all share one upright
+  shape keep it; a mix of shapes goes on the 1080×1920 canvas.
+- **Save clips only.** Copies every ready clip to the output folder unchanged, numbered in list order.
+  This is the batch downloader.
+
+A sources list with each clip's title and link is saved next to the combined video, so you can credit
+the creators.
 
 ### Already-short videos stay one clip
 
@@ -145,6 +180,9 @@ Smoke test the built app without clicking (used by CI):
 ```bash
 npm run build
 MOVIETOSHORT_SMOKE=shot.png MOVIETOSHORT_SMOKE_FILE=some.mp4 MOVIETOSHORT_SMOKE_RENDER=1 MOVIETOSHORT_SMOKE_OUT=./out npx electron .
+MOVIETOSHORT_SMOKE=shot.png MOVIETOSHORT_SMOKE_MODE=highlights MOVIETOSHORT_SMOKE_FILE=long.mp4 MOVIETOSHORT_SMOKE_RENDER=1 npx electron .
+# Combine: separate files with ; on Windows and : on macOS and Linux
+MOVIETOSHORT_SMOKE=shot.png MOVIETOSHORT_SMOKE_MODE=combine MOVIETOSHORT_SMOKE_FILES="a.mp4;b.mp4" MOVIETOSHORT_SMOKE_RENDER=1 npx electron .
 ```
 
 ## How it works
@@ -161,7 +199,9 @@ src/
     render.ts       renders every part sequentially, writes manifest.json + captions.txt
     encoders.ts     hardware encoder detection (real test encode)
     ipc.ts          IPC handlers, one cancellable job at a time
+    compose.ts      Highlights and Combine: cut each piece to one frame and rate, join, then brand
   shared/output.ts  output frame size, safe zones (portrait sources keep their own frame)
+  shared/highlights.ts  snippet planner and clip timeline, exact to the frame and the audio sample
   preload/     contextBridge API (window.api)
   renderer/    React UI. Overlays (badge, title, watermark, teaser) are drawn on a <canvas>
                at 1080×1920 and sent to ffmpeg as PNGs, so any font/style works on any OS.

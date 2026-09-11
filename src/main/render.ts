@@ -71,6 +71,8 @@ function parseProgressLine(line: string): { outTimeSec?: number; fps?: number; s
 export interface RenderContext {
   signal: AbortSignal
   onProgress: (e: ProgressEvent) => void
+  /** Where scratch files go. Defaults to the app's temp folder. */
+  tempRoot?: string
 }
 
 interface RenderUnit {
@@ -88,10 +90,10 @@ export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<Ren
   if (!parts.length) throw new Error('Nothing to render: the plan has no parts.')
   if (!settings.outputDir) throw new Error('Choose an output folder first.')
 
-  const title = safeFileName(source.title)
+  const title = safeFileName(job.outDirName ?? source.title)
   const outDir = path.join(settings.outputDir, title)
   fs.mkdirSync(outDir, { recursive: true })
-  const work = fs.mkdtempSync(path.join(tempDir(), 'job-'))
+  const work = fs.mkdtempSync(path.join(ctx.tempRoot ?? tempDir(), 'job-'))
 
   const encoder = settings.hardwareEncode ? await detectHardwareEncoder() : null
   const fps = targetFps(settings, source)
@@ -101,7 +103,12 @@ export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<Ren
     kind: 'part',
     part,
     overlays: job.overlays[i] ?? {},
-    outFile: path.join(outDir, `${title} - Part ${String(part.index).padStart(width, '0')}.mp4`),
+    outFile: path.join(
+      outDir,
+      job.fileName && parts.length === 1
+        ? `${safeFileName(job.fileName)}.mp4`
+        : `${title} - Part ${String(part.index).padStart(width, '0')}.mp4`
+    ),
     label: `part ${part.index} of ${parts.length}`,
     metaTitle: `${source.title} - ${renderTemplate(settings.badgeTemplate || 'Part {n}', part.index, parts.length)}`
   }))
@@ -234,7 +241,7 @@ export async function renderJob(job: RenderJob, ctx: RenderContext): Promise<Ren
     fs.rmSync(work, { recursive: true, force: true })
   }
 
-  if (!cancelled) writeSidecars(outDir, title, job, files, fullFile, originalFile)
+  if (!cancelled && job.sidecars !== false) writeSidecars(outDir, title, job, files, fullFile, originalFile)
   return { outputDir: outDir, files, fullFile, originalFile, cancelled }
 }
 
@@ -291,7 +298,8 @@ export async function renderPreview(req: PreviewRequest, signal: AbortSignal): P
       fps: null,
       partDuration: part.duration,
       overlays,
-      previewOffset: offset
+      previewOffset: offset,
+      outSize: req.outSize
     })
     const outFile = path.join(work, 'frame.jpg')
     const args = [
@@ -301,7 +309,7 @@ export async function renderPreview(req: PreviewRequest, signal: AbortSignal): P
       'error',
       '-y',
       '-ss',
-      formatFfmpegTime(part.start + offset),
+      formatFfmpegTime(req.sourceTimeSec ?? part.start + offset),
       '-t',
       '1',
       '-i',

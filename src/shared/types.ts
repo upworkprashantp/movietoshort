@@ -63,6 +63,13 @@ export type BadgePosition =
 export type LabelStyle = 'pill' | 'outline' | 'shadow'
 export type LabelSize = 'small' | 'medium' | 'large'
 export type QualityPreset = 'fast' | 'balanced' | 'high'
+/**
+ * What the app is doing:
+ *  - split:      one long video -> numbered shorts (or one branded clip if it is already short)
+ *  - highlights: one long video -> one silent recap built from short snippets spread across it
+ *  - combine:    many clips (links and files) -> one longer video, or just download them all
+ */
+export type AppMode = 'split' | 'highlights' | 'combine'
 /** How many files to produce: split into parts, one clip, or decide from the source length. */
 export type OutputMode = 'auto' | 'split' | 'single'
 /** 'auto' keeps portrait/square sources at their own size and converts landscape to 9:16. */
@@ -71,6 +78,8 @@ export type FpsMode = 'source' | '30' | '60'
 export type CookiesBrowser = 'none' | 'chrome' | 'firefox' | 'edge' | 'safari' | 'brave'
 
 export interface Settings {
+  mode: AppMode
+
   // trimming / splitting
   outputMode: OutputMode
   skipStartSec: number
@@ -116,6 +125,13 @@ export interface Settings {
   ctaText: string
   ctaSeconds: number
 
+  // highlights: many short snippets spread across a long video, played back to back
+  highlightTargetSec: number
+  highlightClipSec: number
+
+  // combine
+  combineName: string
+
   // audio
   normalizeAudio: boolean
 
@@ -141,6 +157,8 @@ export interface YtAuth {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  mode: 'split',
+
   outputMode: 'auto',
   skipStartSec: 0,
   skipEndSec: 0,
@@ -182,6 +200,11 @@ export const DEFAULT_SETTINGS: Settings = {
   ctaEnabled: true,
   ctaText: 'Follow for more',
   ctaSeconds: 3,
+
+  highlightTargetSec: 120,
+  highlightClipSec: 2.5,
+
+  combineName: 'Compilation',
 
   normalizeAudio: true,
 
@@ -229,6 +252,12 @@ export interface RenderJob {
   overlays: PartOverlays[] // one entry per part
   /** Present when settings.saveFullVideo is on: the whole trimmed range as one clip. */
   full?: { part: PartPlan; overlays: PartOverlays }
+  /** Folder inside the output folder. Defaults to the source title. */
+  outDirName?: string
+  /** File name without extension, for a one-part job. Defaults to "<title> - Part 01". */
+  fileName?: string
+  /** Write captions.txt and manifest.json next to the videos. Defaults to true. */
+  sidecars?: boolean
 }
 
 export interface PreviewRequest {
@@ -236,8 +265,53 @@ export interface PreviewRequest {
   settings: Settings
   part: PartPlan
   overlays: PartOverlays
-  /** Seconds into the part to grab the frame from. */
+  /** Seconds into the part to grab the frame from (the output clock, drives overlays). */
   offsetSec: number
+  /** Where to read the frame in the source, when it differs from part.start + offsetSec. */
+  sourceTimeSec?: number
+  /** Force this output frame instead of deriving it from the source. */
+  outSize?: { width: number; height: number }
+}
+
+/** One snippet of a highlights recap. */
+export interface Segment {
+  index: number
+  /** Where the snippet starts in the source video. */
+  start: number
+  /** Frame-exact length. */
+  duration: number
+  /** Where the snippet starts in the finished recap. */
+  at: number
+}
+
+/** A clip's place in a combined video. `index` points back into the clip list. */
+export interface TimelineItem {
+  index: number
+  duration: number
+  at: number
+}
+
+export interface HighlightsJob {
+  source: SourceInfo
+  settings: Settings
+  segments: Segment[]
+  fps: number
+  /** Overlays timed against the finished recap. */
+  overlays: PartOverlays
+}
+
+export interface CombineJob {
+  clips: SourceInfo[]
+  settings: Settings
+  fps: number
+  frame: { width: number; height: number }
+  /** Overlays timed against the finished combined video. */
+  overlays: PartOverlays
+}
+
+export interface SavedCopies {
+  outputDir: string
+  files: string[]
 }
 
 /** Everything the renderer and the preview need to agree on about the output frame. */
@@ -284,7 +358,7 @@ export interface AppInfo {
   ffmpegPath: string
   ffprobePath: string
   /** Present only when the app was started in smoke-test mode (see README). */
-  smoke?: { file?: string; render?: boolean; single?: boolean; outputDir?: string }
+  smoke?: { file?: string; files?: string[]; mode?: AppMode; render?: boolean; single?: boolean; outputDir?: string }
 }
 
 export interface EncoderInfo {

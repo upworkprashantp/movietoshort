@@ -69,3 +69,25 @@ export function safeZones(size: OutputSize): SafeZones {
 export function sameAspect(srcW: number, srcH: number, outW: number, outH: number): boolean {
   return Math.abs(srcW / srcH - outW / outH) < 0.01
 }
+
+/**
+ * One frame for a video joined from several clips.
+ *
+ * In Auto, clips that all share one upright shape (a stack of 9:16 Reels) keep that shape at the
+ * size of the sharpest clip, so nothing gets bars. Any mix of shapes goes on the vertical canvas,
+ * where each clip is fitted with the chosen layout.
+ */
+export function combineFrame(sizes: Array<{ width: number; height: number }>, mode: SizeMode): OutputSize {
+  const valid = sizes.filter((s) => s.width > 0 && s.height > 0)
+  const vertical: OutputSize = { width: VERTICAL_W, height: VERTICAL_H, uiScale: 1, keptSource: false }
+  if (!valid.length || mode === 'vertical') return vertical
+  if (mode === 'source') return outputSize(valid[0].width, valid[0].height, 'source')
+
+  const first = valid[0]
+  const allUpright = valid.every((s) => s.height >= s.width)
+  const sameShape = valid.every((s) => sameAspect(s.width, s.height, first.width, first.height))
+  if (!allUpright || !sameShape) return vertical
+
+  const sharpest = valid.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a))
+  return outputSize(sharpest.width, sharpest.height, 'auto')
+}

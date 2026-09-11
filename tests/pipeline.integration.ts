@@ -15,7 +15,11 @@ import { videoEncoderArgs, AUDIO_ARGS } from '../src/shared/encoding'
 import { DEFAULT_SETTINGS } from '../src/shared/types'
 import { formatFfmpegTime } from '../src/shared/time'
 import { parseSilenceOutput, planParts } from '../src/shared/plan'
-import { outputSize } from '../src/shared/output'
+import { combineFrame, outputSize } from '../src/shared/output'
+import { planHighlights, segmentFps } from '../src/shared/highlights'
+import { renderCombine, renderHighlights } from '../src/main/compose'
+import { probeFile } from '../src/main/probe'
+import type { PartOverlays, Settings } from '../src/shared/types'
 
 const ff = String(ffmpegStatic)
 const ffprobe = ffprobeStatic.path
@@ -145,7 +149,126 @@ for (const layout of ['blur', 'fill', 'solid'] as const) {
   }
 }
 
-console.log(`
+// ---------------------------------------------------------------------------
+// 6. Highlights and Combine through the real compose pipeline: cut -> join -> brand.
+// ---------------------------------------------------------------------------
+interface Probed {
+  streams: Array<{ codec_type: string; width?: number; height?: number; duration?: string }>
+  format: { duration: string }
+}
+function probeJson(file: string): Probed {
+  return JSON.parse(run(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type,width,height,duration:format=duration', '-of', 'json', file]).out) as Probed
+}
+function meanVolume(file: string, from: number, len: number): number {
+  const r = run(ff, ['-hide_banner', '-nostats', '-ss', String(from), '-t', String(len), '-i', file, '-af', 'volumedetect', '-f', 'null', '-'])
+  const m = /mean_volume:\s*(-?[\d.]+|-inf) dB/.exec(r.err)
+  return !m || m[1] === '-inf' ? -999 : Number(m[1])
+}
+const dataUrl = (file: string): string => 'data:image/png;base64,' + fs.readFileSync(file).toString('base64')
+
+async function composeChecks(): Promise<void> {
+  const outRoot = path.join(dir, 'out')
+  const settings: Settings = { ...DEFAULT_SETTINGS, outputDir: outRoot, quality: 'fast' }
+  const ctx = { signal: new AbortController().signal, tempRoot: dir, onProgress: () => undefined }
+  const overlays: PartOverlays = {
+    intro: { dataUrl: dataUrl(path.join(dir, 'badge.png')), position: 'top-center', from: 0, to: 2, fadeIn: 0.3, fadeOut: 0.3, animate: 'rise' }
+  }
+
+  // --- highlights: 45 s landscape video -> 12 s silent vertical recap of 1.5 s snippets ---
+  const longSrc = await probeFile(src, 'Integration Long', 'local', undefined, { thumbnail: false })
+  const fps = segmentFps(longSrc.fps, 'source')
+  const segments = planHighlights({ durationSec: longSrc.durationSec, skipStartSec: 0, skipEndSec: 0, targetSec: 12, clipSec: 1.5, fps })
+  check(segments.length === 8, 'highlights plan', `${segments.length} snippets at ${fps} fps`)
+  const t0 = Date.now()
+  const hl = await renderHighlights({ source: longSrc, settings, segments, fps, overlays }, ctx)
+  const hlInfo = probeJson(hl.files[0])
+  const hlVideo = hlInfo.streams.find((x) => x.codec_type === 'video')
+  const hlAudio = hlInfo.streams.find((x) => x.codec_type === 'audio')
+  check(
+    hlVideo?.width === 1080 && hlVideo?.height === 1920 && !hlAudio && Math.abs(Number(hlInfo.format.duration) - 12) < 0.1,
+    'render highlights',
+    `${((Date.now() - t0) / 1000).toFixed(1)}s, ${hlVideo?.width}x${hlVideo?.height}, audio=${!!hlAudio}, duration=${Number(hlInfo.format.duration).toFixed(2)}s (want 12, silent)`
+  )
+
+  // --- combine: three clips with different sizes, rates, sample rates, one with no sound ---
+  const clipA = path.join(dir, 'clipA.mp4')
+  const clipB = path.join(dir, 'clipB.mp4')
+  const clipC = path.join(dir, 'clipC.mp4')
+  run(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1080x1920:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+    '-t', '6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', clipA])
+  run(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=720x1280:rate=25',
+    '-t', '4.2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-an', clipB])
+  run(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=44100',
+    '-t', '5', '-ac', '1', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', clipC])
+  const clips = await Promise.all([clipA, clipB, clipC].map((f) => probeFile(f, path.basename(f, '.mp4'), 'local', undefined, { thumbnail: false })))
+  const cFps = segmentFps(clips[0].fps, 'source')
+  const frame = combineFrame(clips.map((c) => ({ width: c.displayWidth, height: c.displayHeight })), 'auto')
+  check(frame.width === 1080 && frame.height === 1920, 'combine frame for mixed shapes', `${frame.width}x${frame.height}`)
+
+  const t1 = Date.now()
+  const cb = await renderCombine(
+    { clips, settings: { ...settings, combineName: 'Integration Combine' }, fps: cFps, frame: { width: frame.width, height: frame.height }, overlays },
+    ctx
+  )
+  const cbInfo = probeJson(cb.files[0])
+  const cbVideo = cbInfo.streams.find((x) => x.codec_type === 'video')
+  const cbAudio = cbInfo.streams.find((x) => x.codec_type === 'audio')
+  const vDur = Number(cbVideo?.duration ?? 0)
+  const aDur = Number(cbAudio?.duration ?? 0)
+  check(
+    cbVideo?.width === 1080 && cbVideo?.height === 1920 && Math.abs(vDur - 15.2) < 0.1,
+    'render combine',
+    `${((Date.now() - t1) / 1000).toFixed(1)}s, ${cbVideo?.width}x${cbVideo?.height}, video=${vDur.toFixed(2)}s (want 15.2)`
+  )
+  check(!!cbAudio && Math.abs(vDur - aDur) < 0.1, 'combine keeps sound and picture the same length', `audio=${aDur.toFixed(2)}s video=${vDur.toFixed(2)}s`)
+
+  const loudA = meanVolume(cb.files[0], 1, 4)
+  const quietB = meanVolume(cb.files[0], 6.6, 3.2)
+  const loudC = meanVolume(cb.files[0], 11, 3.5)
+  check(loudA > -40 && quietB < -60 && loudC > -40, 'clips joined in order with silence for the clip without sound', `A=${loudA}dB B=${quietB}dB C=${loudC}dB`)
+  check(fs.existsSync(path.join(cb.outputDir, 'Integration Combine - sources.txt')), 'combine writes a sources list for credits')
+
+  // --- sync across joins: every clip has a flash and a beep at exactly 2.000 s. After joining they
+  //     must still coincide at 2, 8 and 14 s. Any drift that builds up across joins shows here. ---
+  const variants = [
+    { w: 1080, h: 1920, rate: 30, sr: 48000 },
+    { w: 1280, h: 720, rate: 24, sr: 44100 }, // re-framed through the blur layout
+    { w: 720, h: 1280, rate: 25, sr: 48000 }
+  ]
+  const syncFiles = variants.map((v, i) => {
+    const f = path.join(dir, `sync${i}.mp4`)
+    run(ff, ['-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', `color=c=black:s=${v.w}x${v.h}:r=${v.rate}:d=6,drawbox=x=0:y=0:w=${v.w}:h=${v.h}:color=white:t=fill:enable='between(t,2,2.3)'`,
+      '-f', 'lavfi', '-i', `aevalsrc='if(between(t,2,2.3),0.5*sin(1000*2*PI*t),0)':s=${v.sr}:d=6`,
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', f])
+    return f
+  })
+  const syncSources = await Promise.all(syncFiles.map((f) => probeFile(f, path.basename(f, '.mp4'), 'local', undefined, { thumbnail: false })))
+  const syncFrame = combineFrame(syncSources.map((c) => ({ width: c.displayWidth, height: c.displayHeight })), 'auto')
+  const plain: Settings = { ...settings, combineName: 'Integration Sync', progressBarEnabled: false, watermarkEnabled: false, introEnabled: false, ctaEnabled: false }
+  const synced = await renderCombine(
+    { clips: syncSources, settings: plain, fps: segmentFps(syncSources[0].fps, 'source'), frame: { width: syncFrame.width, height: syncFrame.height }, overlays: {} },
+    ctx
+  )
+  const aLog = run(ff, ['-hide_banner', '-nostats', '-i', synced.files[0], '-af', 'silencedetect=noise=-35dB:d=0.05', '-vn', '-f', 'null', '-']).err
+  const vLog = run(ff, ['-hide_banner', '-nostats', '-i', synced.files[0], '-vf', 'blackdetect=d=0.02:pix_th=0.2', '-an', '-f', 'null', '-']).err
+  // Both detectors also report the end of the file as the end of a silent / black stretch: ignore it.
+  const syncEnd = syncSources.length * 6 - 0.5
+  const beeps = [...aLog.matchAll(/silence_end:\s*([\d.]+)/g)].map((m) => Number(m[1])).filter((t) => t < syncEnd)
+  const flashes = [...vLog.matchAll(/black_end:([\d.]+)/g)].map((m) => Number(m[1])).filter((t) => t < syncEnd)
+  const offsets = flashes.map((f, i) => Math.round(((beeps[i] ?? Number.NaN) - f) * 1000))
+  check(
+    flashes.length === 3 && beeps.length === 3 && offsets.every((o) => Math.abs(o) <= 40),
+    'joined clips stay in sync',
+    `flashes ${flashes.map((x) => x.toFixed(3)).join(' ')} · beeps ${beeps.map((x) => x.toFixed(3)).join(' ')} · sound minus picture ${offsets.join(' / ')} ms`
+  )
+}
+
+composeChecks()
+  .catch((err: unknown) => check(false, 'compose pipeline threw', err instanceof Error ? err.message : String(err)))
+  .finally(() => {
+    console.log(`
 artifacts in ${dir}
 `)
-process.exit(failed ? 1 : 0)
+    process.exit(failed ? 1 : 0)
+  })

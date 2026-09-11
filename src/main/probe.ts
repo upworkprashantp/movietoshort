@@ -43,7 +43,8 @@ export async function probeFile(
   file: string,
   title?: string,
   origin: SourceInfo['origin'] = 'local',
-  url?: string
+  url?: string,
+  opts: { thumbnail?: boolean } = {}
 ): Promise<SourceInfo> {
   const res = await runOk(ffprobePath(), [
     '-v',
@@ -79,7 +80,8 @@ export async function probeFile(
     return { index: a.index, label }
   })
 
-  const thumbnail = await grabThumbnail(file, Math.min(duration * 0.1, 120)).catch(() => undefined)
+  const thumbnail =
+    opts.thumbnail === false ? undefined : await grabThumbnail(file, Math.min(duration * 0.1, 120)).catch(() => undefined)
 
   return {
     path: file,

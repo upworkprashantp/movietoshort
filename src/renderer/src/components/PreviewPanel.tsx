@@ -1,14 +1,20 @@
 import React, { useState } from 'react'
-import type { PartPlan } from '@shared/types'
-import { formatTime } from '@shared/time'
 import { Button, Card, Segmented, Toggle } from './ui'
 
 export type Moment = 'start' | 'middle' | 'end'
 
 interface Props {
-  parts: PartPlan[]
+  /** How many items the arrows step through (parts, snippets or clips). */
+  count: number
+  /** 1-based. */
   selected: number
   onSelect: (index: number) => void
+  /** "Part", "Snippet" or "Clip". */
+  noun: string
+  /** Describes the selected item. */
+  subtitle?: string
+  endLabel?: string
+  endHint?: string
   moment: Moment
   onMoment: (m: Moment) => void
   image: string | null
@@ -20,15 +26,15 @@ interface Props {
 
 export function PreviewPanel(p: Props): JSX.Element {
   const [safe, setSafe] = useState(false)
-  const part = p.parts.find((x) => x.index === p.selected)
+  const has = p.count > 0 && p.selected >= 1 && p.selected <= p.count
   return (
     <Card
       title="Preview"
-      subtitle={part ? `Part ${part.index} · ${formatTime(part.start, true)} → ${formatTime(part.end, true)}` : 'Exactly what will be rendered, at 1080×1920.'}
+      subtitle={has ? (p.subtitle ?? `${p.noun} ${p.selected}`) : 'Exactly what will be rendered.'}
       right={
         <div className="row">
           <Toggle checked={safe} onChange={setSafe} label="Safe zones" />
-          <Button size="sm" onClick={p.onRefresh} disabled={p.disabled || !part}>
+          <Button size="sm" onClick={p.onRefresh} disabled={p.disabled || !has}>
             Refresh
           </Button>
         </div>
@@ -52,11 +58,13 @@ export function PreviewPanel(p: Props): JSX.Element {
       {p.error && <p className="error small">{p.error}</p>}
       <div className="row space-between wrap">
         <div className="row">
-          <Button size="sm" variant="ghost" disabled={!part || part.index <= 1} onClick={() => p.onSelect(p.selected - 1)}>
+          <Button size="sm" variant="ghost" disabled={!has || p.selected <= 1} onClick={() => p.onSelect(p.selected - 1)}>
             ◀
           </Button>
-          <span className="mono small">Part {part?.index ?? '–'} / {p.parts.length || '–'}</span>
-          <Button size="sm" variant="ghost" disabled={!part || part.index >= p.parts.length} onClick={() => p.onSelect(p.selected + 1)}>
+          <span className="mono small">
+            {p.noun} {has ? p.selected : '–'} / {p.count || '–'}
+          </span>
+          <Button size="sm" variant="ghost" disabled={!has || p.selected >= p.count} onClick={() => p.onSelect(p.selected + 1)}>
             ▶
           </Button>
         </div>
@@ -67,7 +75,7 @@ export function PreviewPanel(p: Props): JSX.Element {
           options={[
             { value: 'start', label: 'Start' },
             { value: 'middle', label: 'Middle' },
-            { value: 'end', label: 'Last 3s', title: 'Shows the next-part teaser' }
+            { value: 'end', label: p.endLabel ?? 'Last 3s', title: p.endHint ?? 'Shows the next-part teaser' }
           ]}
         />
       </div>
